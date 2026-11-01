@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    name: Build & Test (Apple Silicon)
+    runs-on: macos-14
+
+    steps:
+      # ── 1. Checkout ────────────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── 2. Rust toolchain ─────────────────────────────────────────────────
+      - name: Install Rust toolchain (aarch64-apple-darwin)
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          target: aarch64-apple-darwin
+          override: true
+          components: rustfmt, clippy
+
+      # ── 3. Cache Cargo registry & build artifacts ─────────────────────────
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+          key: cargo-registry-${{ runner.os }}-${{ hashFiles('rust-core/Cargo.lock') }}
+          restore-keys: |
+            cargo-registry-${{ runner.os }}-
+
+      - name: Cache Cargo build artifacts
+        uses: actions/cache@v4
+        with:
+          path: rust-core/target
+          key: cargo-target-${{ runner.os }}-aarch64-apple-darwin-${{ hashFiles('rust-core/Cargo.lock') }}
+          restore-keys: |
+            cargo-target-${{ runner.os }}-aarch64-apple-darwin-
+
+      # ── 4. Format check ───────────────────────────────────────────────────
+      - name: cargo fmt --check
+        run: cargo fmt --manifest-path rust-core/Cargo.toml -- --check
+
+      # ── 5. Unit tests ──────────────────────────────────────────────────────
+      - name: cargo test
+        run: cargo test --manifest-path rust-core/Cargo.toml
+
+      # ── 6. Build Rust static library + generate UniFFI Swift bindings ──────
+      - name: Build Rust bridge
+        run: ./scripts/build_rust_bridge.sh
+
+      # ── 7. Build Swift app ────────────────────────────────────────────────
+      - name: swift build (debug, arm64)
+        run: swift build --package-path macos-app --configuration debug --arch arm64
+
+      # ── 8. Package DMG installer ──────────────────────────────────────────
+      - name: Package DMG
+        run: ./scripts/package_dmg.sh
+
+      # ── 9. Upload build artifacts ─────────────────────────────────────────
+      - name: Upload DMG installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: RustDisk-macos-arm64
+          path: |
+            dist/RustDisk-macos-arm64.dmg
+            dist/RustDisk-macos-arm64.dmg.sha256
+          if-no-files-found: error
+          retention-days: 30

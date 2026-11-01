@@ -1,0 +1,5 @@
+/rust-core/target/
+/macos-app/.build/
+/macos-app/lib/
+/dist/
+/graphify-out/

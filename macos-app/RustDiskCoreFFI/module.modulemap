@@ -1,0 +1,4 @@
+module rustdisk_coreFFI {
+    header "rustdisk_coreFFI.h"
+    export *
+}
