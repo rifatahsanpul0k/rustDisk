@@ -4,132 +4,143 @@
 
 [![CI](https://github.com/rifatahsanpul0k/rustDisk/actions/workflows/ci.yml/badge.svg)](https://github.com/rifatahsanpul0k/rustDisk/actions/workflows/ci.yml)
 [![macOS](https://img.shields.io/badge/macOS-13%2B-blue?logo=apple)](https://www.apple.com/macos/)
+[![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-M1%20%7C%20M2%20%7C%20M3%20%7C%20M4-black?logo=apple)](https://www.apple.com/mac/)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
+![RustDisk Quick Clean Dashboard](docs/images/01_quick_clean.png)
 
 ---
 
 ## Why This Exists
 
-Every MacBook Pro ships with 256 GB of storage. Between Xcode's ever-growing `DerivedData`, nested `node_modules` trees across dozens of dead projects, Homebrew caches, Python virtualenvs, and Docker's sparse virtual disk, the real reclaim opportunity is invisible inside macOS's native Storage UI.
+Every MacBook ships with 256 GB or 512 GB of storage. Between Xcode's ever-expanding `DerivedData`, nested `node_modules` trees across dozens of forgotten projects, Homebrew caches, Python virtual environments, and Docker's sparse virtual disks, real reclaimable space is invisible inside macOS's native Storage UI.
 
-RustDisk is a **systems-level answer to a systems-level problem.** It is written at the language layer where APFS block allocation is native — not wrapped in Electron, not throttled by a webview, not guessing from file metadata alone. The scanner uses actual Unix allocated blocks (`st_blocks × 512`) to surface *physical* disk pressure, not misleading logical sizes.
+RustDisk is a **systems-level answer to a systems-level problem.** It is written at the language layer where APFS block allocation is native — not wrapped in Electron, not throttled by a webview, not guessing from file metadata alone. The scanner queries Unix allocated blocks (`st_blocks × 512`) to surface *physical* disk pressure rather than misleading logical file sizes.
 
 ---
 
-## Architecture
+## 📸 Screenshots & Visual Tour
+
+RustDisk is designed around **Jakob Nielsen's 10 Usability Heuristics** — spacious, calm, and friendly for everyday users (aged 13+) while retaining deep technical rigor for power users.
+
+### 1. 🚀 Quick Clean (Home Dashboard)
+*One-click safe cleanup with an instant visual breakdown of your Mac's internal storage.*
+
+![Quick Clean Dashboard](docs/images/01_quick_clean.png)
+
+- **Storage Meter:** Real-time APFS allocation bar showing currently used, selected to clean, free now, and projected free space after cleanup.
+- **Hero Clean Action:** Safely reclaims temporary caches and stale build outputs without touching personal documents, pictures, or code.
+- **Interactive Category Cards:** Scan only the categories you want, when you want.
+
+---
+
+### 2. 🧹 Junk & Temp Files
+*Leftover application and browsing caches. Cleaning these never affects your personal files.*
+
+![Junk & Temp Files](docs/images/02_junk_and_temp_files.png)
+
+- **3-Element Row Rule:** Every item displays an icon + bold friendly title with a plain-English explanation, a single safety badge, and its physical disk footprint.
+- **Progressive Disclosure:** Deep Unix paths, physical vs. logical byte deltas, and block metrics remain cleanly tucked away behind the toolbar **"Pro Details"** toggle or row `ⓘ` popover.
+- **Zero Risk:** Recreated automatically by macOS or apps as needed.
+
+---
+
+### 3. 🛠️ Old Coding Folders
+*Heavy dependency folders from old software projects you haven't opened lately. Your source code and Git history are never touched.*
+
+![Old Coding Folders](docs/images/03_old_coding_folders.png)
+
+- **Activity-Aware Safety:** Automatically identifies `node_modules`, Rust `target/`, Python `.venv`, Swift `.build/`, and Gradle trees untouched for 30+ days.
+- **Active Project Lock:** Projects modified recently are highlighted with a lock icon and protected from accidental deletion.
+- **Restore Hints:** Built-in re-installation commands (`npm install`, `cargo build`, `pip install`) displayed on demand.
+
+---
+
+### 4. 📦 Big Files Finder
+*Large downloads, movie files, VM images, and old installers taking up the most room on your Mac.*
+
+![Big Files Finder](docs/images/04_big_files.png)
+
+- **Categorized Inspection:** Disk images & installers (`.dmg`, `.pkg`, `.iso`), compressed archives (`.zip`, `.tar`, `.xip`), AI weights (`.gguf`, `.bin`), and 4K video media.
+- **Filter & Search:** Real-time search by filename or file type.
+
+---
+
+### 5. 🔍 Twin Files (Duplicates)
+*Exact copies of identical files or folders. RustDisk automatically keeps one safe original copy for you.*
+
+![Twin Files Finder](docs/images/05_twin_files.png)
+
+- **Guaranteed Safe Originals:** RustDisk automatically marks the oldest or primary file as **"Keep Safe"** and pre-selects only redundant extra copies.
+- **Multi-Point Sparse Fingerprinting:** Files $\ge$ 1 GiB use deterministic 8-window stride sampling with `F_NOCACHE`, matching multi-gigabyte files in milliseconds without polluting Apple Silicon Unified Memory.
+- **BLAKE3 Cryptographic Verification:** Eliminates false positives with cryptographic integrity.
+
+---
+
+## Architecture & Performance
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│  SwiftUI Front-end  (macos-app/)                                    │
-│  ┌───────────────────────────────────────────────────────────────┐  │
-│  │  DiskAuditViewModel  →  NavigationTab  →  Audit Views         │  │
-│  └────────────────────────────┬──────────────────────────────────┘  │
-│                 UniFFI FFI Bridge  (generated Swift + C header)      │
-│                 ↕  librustdisk_core.a  (static, zero .dylib)        │
-│  ┌───────────────────────────────────────────────────────────────┐  │
-│  │  Rust Engine  (rust-core/)                                    │  │
-│  │  jwalk + rayon → multi-threaded APFS crawl                    │  │
-│  │  BLAKE3 content hashing · System Armor blocklist              │  │
-│  │  CleanupReport · Trash / permanent-delete modes               │  │
-│  └───────────────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────────┐
+│  SwiftUI Native Front-end  (macos-app/)                                │
+│  ┌──────────────────────────────────────────────────────────────────┐  │
+│  │  DiskAuditViewModel (On-Demand Category Scanning + Thermal QoS)  │  │
+│  │  NavigationTab  →  Audit Views (Enforcing 3-Element Row Rule)    │  │
+│  └───────────────────────────────┬──────────────────────────────────┘  │
+│                   UniFFI FFI Bridge (Generated Swift + C header)       │
+│                   ↕ librustdisk_core.a (Zero-dylib Static Archive)     │
+│  ┌──────────────────────────────────────────────────────────────────┐  │
+│  │  Rust Engine  (rust-core/)                                       │  │
+│  │  jwalk + rayon → Multi-threaded APFS directory traversal         │  │
+│  │  libc::pthread_set_qos_class_self_np → Utility / Background QoS  │  │
+│  │  libc::setiopolicy_np → IOPOL_UTILITY / IOPOL_THROTTLE disk I/O  │  │
+│  │  libc::fcntl(F_NOCACHE) → Zero Unified Memory cache pollution    │  │
+│  │  BLAKE3 content hashing · 8-point stride sparse fingerprinting   │  │
+│  │  System Armor blocklist · Trash / permanent delete modes         │  │
+│  └──────────────────────────────────────────────────────────────────┘  │
+└────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Key Design Decisions
+### Key Engineering Decisions
 
-| Decision | Rationale |
-|---|---|
-| **Rust `staticlib`** | No dynamic linker path baked into the binary; ships as a single `.app` |
-| **Mozilla UniFFI** | Type-safe, generated FFI — no hand-written C glue, no runtime marshalling surprises |
-| **`jwalk` + `rayon`** | Parallel directory traversal saturates all P-cores on M-series; a 100 GB `~/Library` scans in seconds |
-| **`st_blocks × 512`** | Physical APFS allocation, not `st_size`. HFS+ metadata forks and sparse files report correctly |
-| **No daemon / no background service** | On-demand only — zero battery and privacy footprint when not actively scanning |
-
----
-
-## Features
-
-### 🧹 Smart Caches & Terminal Junk
-
-Deep-enumerates known cache roots across every major toolchain category:
-
-- **Homebrew** — formula/cask-level download cache and build intermediates
-- **npm / pnpm / Yarn / Playwright / Cypress** — web ecosystem caches
-- **pip / uv / Conda / PyPI / Torch / Hugging Face** — Python & ML caches
-- **Gradle / Maven / JVM build** — Java ecosystem build caches
-- **Cargo registry** — downloaded crate sources and build metadata
-- **Xcode DerivedData + Simulator caches** — the single biggest reclaim on most developer Macs
-- **macOS user logs** — `/Library/Logs` and app-specific log directories
-
-Each item is individually enumerated (not a flat folder total), grouped into labelled sections, and shows both physical and logical size where they diverge.
+| Feature | Implementation | Benefit |
+|---|---|---|
+| **Adaptive Thermal Pacing** | `pthread_set_qos_class_self_np` + `setiopolicy_np` | Dispatches heavy scan threads to Apple Silicon Efficiency Cores (`E-cores`), keeping your Mac cool and silent. |
+| **On-Demand Scans** | Category-isolated scanning routines | Scan individual categories in seconds without locking or scanning the entire filesystem. |
+| **Unified Memory Armor** | `libc::fcntl(fd, F_NOCACHE, 1)` | Direct-to-buffer disk reads bypass macOS Unified Memory cache, preventing running apps from being evicted. |
+| **Sparse Stride Hashing** | 8-point 64 KiB window sampling for files $\ge$ 1 GiB | Fingerprints multi-gigabyte VM disks, AI models, and installers reading only 512 KiB per file. |
+| **APFS Physical Accuracy** | `st_blocks × 512` Unix block evaluation | Correctly handles APFS sparse files, clones, and compression without reporting phantom bytes. |
+| **Zero Runtime Dependencies** | Mozilla UniFFI + Rust `staticlib` | Self-contained single-binary native macOS app with zero webviews, Node runtimes, or external frameworks. |
 
 ---
 
-### 📦 Stale Project Dependencies
+## 🛡️ Safety First: System Armor
 
-Detects manifest-backed artifact directories that haven't seen *source-code activity* in 14, 30, 60, or 90 days (configurable):
-
-- `node_modules` (requires sibling `package.json`)
-- Python `.venv` / `env` (requires `requirements.txt`, `pyproject.toml`, etc.)
-- Rust `target/` (requires sibling `Cargo.toml`)
-- Swift `.build/` (requires `Package.swift`)
-- JVM `build/` and `.gradle/` (requires `build.gradle`, `pom.xml`, etc.)
-
-Ambiguous folders without a required sibling manifest are never flagged. Activity is checked **outside** all artifact trees — modifying a build output doesn't keep the project alive.
-
----
-
-### 🔍 3-Tier Duplicate Finder
-
-Identifies identical files using a staged pipeline that avoids hashing every byte of every file:
-
-1. **Size clustering** — groups files by physical allocated size; different-size files cannot be duplicates
-2. **8 KB edge hashing** — reads only the first and last 4 KB of each candidate; eliminates most non-duplicates without a full read
-3. **Full BLAKE3 cryptographic hash** — only files that survive both filters are fully hashed
-
-Duplicate *folders* are detected when all their children resolve to the same hash tree. Hardlinks are excluded from the reclaim estimate (they share blocks). One recommended original is protected in every group.
-
----
-
-### 🛡️ Safety First: System Armor
-
-Every path — both as written and after `canonicalize` resolves symlinks — is validated against a **case-insensitive** blocklist before any deletion is allowed:
+Every path — both as entered and after `canonicalize` resolves symlinks — is verified against a **case-insensitive** safety blocklist before any deletion or move-to-trash operation is permitted:
 
 | Protected Scope | Rule |
 |---|---|
 | OS & system binaries | `/System`, `/bin`, `/sbin`, `/usr`, `/Applications`, all of `/Library` |
 | Third-party installs | `/opt` **except** strict children of `/opt/homebrew` |
-| User accounts | `/Users` and every account home directory |
+| User accounts | `/Users` and every user home directory root |
 | Sensitive credentials | Any path component named `.git`, `.ssh`, `.gnupg`, `.aws` |
 | Container VMs | `Docker.raw` in any casing |
 | Relative traversal | Paths containing `..` are rejected outright |
 
-**Resilient batch cleanup** via `CleanupReport`:
-- Locked paths are skipped; unlocked siblings are still reclaimed
-- Returns `trashed_physical_bytes` (still occupying the volume until Trash is emptied) and `permanently_freed_physical_bytes` (immediately reclaimed) as separate values
-- The status banner reads *"Empty Trash to reclaim space"* after a Trash-mode run
-- `cancel_active_scan()` is exported across FFI — cancels every running `jwalk` walker, `rayon` task, and BLAKE3 hash at its next cooperative check point
-
-**Package uninstall safety:**
-- Package names are validated against an allowlist (`[A-Za-z0-9\-_.@+]`, no leading `-`)
-- The target path must be a **direct child** of the manager's install prefix — `cellar/name` cannot be combined with another package's actual path
+**Safe Batch Cleanup:**
+- **macOS Trash by Default:** Selected items are moved safely to macOS Trash (`~/.Trash`), allowing instant single-click restoration via Finder ("Put Back").
+- **Permanent Deletion Guard:** Optional permanent deletion requires explicit secondary confirmation with an itemized breakdown.
+- **Cooperative Cancellation:** `cancel_active_scan()` halts all background worker threads and I/O loops instantaneously.
 
 ---
 
 ## Installation
 
-1. Go to [**Releases**](https://github.com/your-username/rustdisk/releases) and download `RustDisk-macos-arm64.dmg`
-2. Verify the checksum (optional but recommended):
-   ```bash
-   shasum -a 256 -c RustDisk-macos-arm64.dmg.sha256
-   ```
-3. Open the `.dmg`, drag **RustDisk.app** into **Applications**
-4. Launch RustDisk, then grant **Full Disk Access**:
-   > **System Settings → Privacy & Security → Full Disk Access → enable RustDisk**
+1. Go to [**Releases**](https://github.com/rifatahsanpul0k/rustDisk/releases) and download the latest `RustDisk-macos-arm64.dmg`.
+2. Open the `.dmg` and drag **RustDisk.app** into your **Applications** folder.
+3. Launch RustDisk, then grant **Full Disk Access**:
+   > **System Settings → Privacy & Security → Full Disk Access → Enable RustDisk**
 
-   Without Full Disk Access, protected container paths (Docker data directory, some app sandboxes) cannot be inspected.
-
-> **Requirements:** macOS 13 Ventura or later · Apple Silicon (M1/M2/M3)
+> **System Requirements:** macOS 13 Ventura or later · Apple Silicon Mac (M1, M2, M3, M4).
 
 ---
 
@@ -137,38 +148,40 @@ Every path — both as written and after `canonicalize` resolves symlinks — is
 
 ### Prerequisites
 
-- Rust (stable) with `aarch64-apple-darwin` target
+- Rust (stable toolchain) with `aarch64-apple-darwin` target:
+  ```bash
+  rustup target add aarch64-apple-darwin
+  ```
 - Xcode 15+ with Swift 5.9+
 
-```bash
-# 1. Clone
-git clone https://github.com/your-username/rustdisk.git
-cd rustdisk
+### Build Steps
 
-# 2. Build the Rust static library and generate UniFFI Swift bindings
+```bash
+# 1. Clone the repository
+git clone https://github.com/rifatahsanpul0k/rustDisk.git
+cd rustDisk
+
+# 2. Compile the Rust core and generate UniFFI Swift bindings
 ./scripts/build_rust_bridge.sh
 
-# 3a. Open in Xcode (recommended)
-open macos-app/Package.swift
+# 3. Build the macOS application
+swift build --package-path macos-app --configuration release --arch arm64
 
-# 3b. Or build from the command line
-swift build --package-path macos-app --configuration debug --arch arm64
-```
-
-### Run checks locally
-
-```bash
-cargo fmt  --manifest-path rust-core/Cargo.toml -- --check
-cargo test --manifest-path rust-core/Cargo.toml
-swift build --package-path macos-app --configuration debug --arch arm64
-```
-
-### Package a release DMG
-
-```bash
+# 4. Package a distributable DMG
 ./scripts/package_dmg.sh
 # → dist/RustDisk-macos-arm64.dmg
 # → dist/RustDisk-macos-arm64.dmg.sha256
+```
+
+### Run Checks Locally
+
+```bash
+# Run Rust tests and format check
+cargo fmt  --manifest-path rust-core/Cargo.toml -- --check
+cargo test --manifest-path rust-core/Cargo.toml
+
+# Compile Swift app in debug mode
+swift build --package-path macos-app --configuration debug --arch arm64
 ```
 
 ---
@@ -176,40 +189,32 @@ swift build --package-path macos-app --configuration debug --arch arm64
 ## Repository Layout
 
 ```
-rust-core/                       Rust scanner, safety, package & cleaner engine
+rust-core/                       Rust scanner, thermal throttling & cleaner engine
   src/lib.rs                     UniFFI interface surface (exported types & functions)
   src/scanner.rs                 jwalk + rayon APFS crawler
-  src/duplicates.rs              3-tier duplicate detection pipeline
-  src/cleaner.rs                 CleanupReport, System Armor, deletion modes
+  src/thermal.rs                 QoS thread scheduling, IOPOL_THROTTLE & adaptive sleep
+  src/duplicates.rs              3-tier duplicate detection & 8-point stride sampling
+  src/cleaner.rs                 CleanupReport, System Armor & trash/permanent deletion
   src/packages.rs                Terminal package manager detection & measurement
-  uniffi-bindgen.rs              CLI binary that drives UniFFI code generation
+  uniffi-bindgen.rs              CLI binary driving UniFFI code generation
 
+macos-app/                       SwiftUI native front-end
+  Package.swift                  SwiftPM manifest linking librustdisk_core.a
+  RustDisk/Generated/            Generated UniFFI Swift file + C header
+  RustDiskCoreFFI/               SwiftPM system-library target for the generated C header
+  RustDisk/ViewModels/           DiskAuditViewModel — single source of truth for UI state
+  RustDisk/Views/                SwiftUI views (one file per navigation tab)
+  RustDisk/ScreenshotCapture.swift Automated headless Retina screenshot generator
+
+docs/images/                     High-resolution dark mode screenshots for documentation
 scripts/
   build_rust_bridge.sh           Compile aarch64 release → generate Swift bindings → stage .a
   package_release_app.sh         Build and sign dist/RustDisk.app
-  package_dmg.sh                 Wrap app into a compressed, ad-hoc-signed DMG
-
-macos-app/
-  Package.swift                  SwiftPM manifest; links librustdisk_core.a by explicit path
-  RustDisk/Generated/            Generated UniFFI Swift file + C header (not hand-edited)
-  RustDiskCoreFFI/               SwiftPM system-library target for the generated C header
-  lib/                           Staged librustdisk_core.a (git-ignored)
-  RustDisk/ViewModels/           DiskAuditViewModel — single source of truth for UI state
-  RustDisk/Views/                SwiftUI views (one file per tab)
+  package_dmg.sh                 Wrap app into a compressed, release-ready DMG
 ```
 
 ---
 
-## Tech Stack
+## License
 
-| Layer | Technology |
-|---|---|
-| Scanner engine | Rust 1.x · `jwalk` · `rayon` · `blake3` · `libc` |
-| Safety & cleanup | `trash` crate · custom System Armor blocklist |
-| FFI bridge | Mozilla UniFFI 0.28 |
-| Front-end | SwiftUI · Swift Package Manager |
-| CI | GitHub Actions · `macos-14` (Apple Silicon) |
-
----
-
-*Built to learn what actually lives on a developer's SSD — and to reclaim it safely.*
+This project is licensed under the [MIT License](LICENSE).

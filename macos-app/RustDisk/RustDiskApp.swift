@@ -4,6 +4,13 @@ import SwiftUI
 struct RustDiskApp: App {
     @StateObject private var viewModel = DiskAuditViewModel()
 
+    init() {
+        if CommandLine.arguments.contains("--capture-screenshots") {
+            ScreenshotCapture.run(outputDir: "docs/images")
+            exit(0)
+        }
+    }
+
     var body: some Scene {
         WindowGroup("RustDisk") {
             MainSplitView()

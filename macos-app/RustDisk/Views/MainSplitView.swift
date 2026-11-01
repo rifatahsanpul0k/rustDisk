@@ -25,9 +25,10 @@ enum NavigationTab: String, CaseIterable, Identifiable {
 
 struct MainSplitView: View {
     @EnvironmentObject private var viewModel: DiskAuditViewModel
+    @State private var columnVisibility: NavigationSplitViewVisibility = .all
 
     var body: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
             List(selection: $viewModel.selectedTab) {
                 Section("Dashboard") {
                     tabRow(.smartOverview)
