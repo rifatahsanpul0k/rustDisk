@@ -2,7 +2,7 @@
 
 **A high-performance macOS disk cleaner built with Rust and SwiftUI.**
 
-[![CI](https://github.com/your-username/rustdisk/actions/workflows/ci.yml/badge.svg)](https://github.com/your-username/rustdisk/actions/workflows/ci.yml)
+[![CI](https://github.com/rifatahsanpul0k/rustDisk/actions/workflows/ci.yml/badge.svg)](https://github.com/rifatahsanpul0k/rustDisk/actions/workflows/ci.yml)
 [![macOS](https://img.shields.io/badge/macOS-13%2B-blue?logo=apple)](https://www.apple.com/macos/)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
