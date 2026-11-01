@@ -88,7 +88,7 @@ final class DiskAuditViewModel: ObservableObject {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in
+            Task { @MainActor [weak self] in
                 self?.updateThermalState()
             }
         }
@@ -114,6 +114,38 @@ final class DiskAuditViewModel: ObservableObject {
         }
         setThermalLevel(level: level)
         self.thermalStateLabel = label
+    }
+
+    var thermalBadgeText: String {
+        let state = ProcessInfo.processInfo.thermalState
+        switch state {
+        case .nominal:
+            return "Rust Engine: Cool (Utility QoS)"
+        case .fair:
+            return "Rust Engine: Efficiency Cores"
+        case .serious:
+            return "Rust Engine: Throttled (Cooling)"
+        case .critical:
+            return "Rust Engine: Emergency Pacing"
+        @unknown default:
+            return "Rust Engine: Active"
+        }
+    }
+
+    var thermalBadgeColor: Color {
+        let state = ProcessInfo.processInfo.thermalState
+        switch state {
+        case .nominal:
+            return .green
+        case .fair:
+            return .blue
+        case .serious:
+            return .orange
+        case .critical:
+            return .red
+        @unknown default:
+            return .green
+        }
     }
 
     var staleProjects: [ScannedItem] {
@@ -663,7 +695,7 @@ final class DiskAuditViewModel: ObservableObject {
             let duplicates = scanDuplicates(rootPath: home, minSizeBytes: duplicateThreshold)
             let overview = getDiskOverview()
 
-            DispatchQueue.main.async {
+            DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 self.safeCacheItems = caches
                 self.projectItems = projects
@@ -834,7 +866,7 @@ final class DiskAuditViewModel: ObservableObject {
                 )
                 let packages = scanTerminalPackages(homeDir: home)
                 let overview = getDiskOverview()
-                DispatchQueue.main.async {
+                DispatchQueue.main.async { [weak self] in
                     guard let self else { return }
                     self.terminalPackages = packages
                     self.diskOverview = overview
@@ -847,7 +879,7 @@ final class DiskAuditViewModel: ObservableObject {
                     }
                 }
             } catch {
-                DispatchQueue.main.async {
+                DispatchQueue.main.async { [weak self] in
                     guard let self else { return }
                     self.isWorking = false
                     self.statusBanner = "Action could not finish. Your files were not touched."
@@ -879,7 +911,7 @@ final class DiskAuditViewModel: ObservableObject {
                 let report = try runPackageMaintenance(action: action)
                 let packages = scanTerminalPackages(homeDir: home)
                 let overview = getDiskOverview()
-                DispatchQueue.main.async {
+                DispatchQueue.main.async { [weak self] in
                     guard let self else { return }
                     self.terminalPackages = packages
                     self.diskOverview = overview
@@ -894,7 +926,7 @@ final class DiskAuditViewModel: ObservableObject {
                     }
                 }
             } catch {
-                DispatchQueue.main.async {
+                DispatchQueue.main.async { [weak self] in
                     guard let self else { return }
                     self.isWorking = false
                     self.statusBanner = "Maintenance action failed: \(error.localizedDescription)"

@@ -25,29 +25,79 @@ enum NavigationTab: String, CaseIterable, Identifiable {
 
 struct MainSplitView: View {
     @EnvironmentObject private var viewModel: DiskAuditViewModel
-    @State private var columnVisibility: NavigationSplitViewVisibility = .all
+    @State private var hoveredTab: NavigationTab?
 
     var body: some View {
-        NavigationSplitView(columnVisibility: $columnVisibility) {
-            List(selection: $viewModel.selectedTab) {
-                Section("Dashboard") {
-                    tabRow(.smartOverview)
+        HStack(spacing: 0) {
+            // Left Custom Dark Sidebar
+            VStack(alignment: .leading, spacing: 18) {
+                // Window Titlebar Brand
+                HStack(spacing: 10) {
+                    Image(systemName: "internaldrive.fill")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(Color.blue)
+                    Text("RustDisk")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundStyle(Color.primary)
+                    Spacer()
                 }
-                Section("Audit Modules") {
+                .padding(.horizontal, 16)
+                .padding(.top, 16)
+
+                // Dashboard Section
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("DASHBOARD")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 2)
+
+                    sidebarItem(.smartOverview)
+                }
+
+                // Audit Modules Section
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("AUDIT MODULES")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 2)
+
                     ForEach(NavigationTab.allCases.dropFirst()) { tab in
-                        tabRow(tab)
+                        sidebarItem(tab)
                     }
                 }
+
+                Spacer()
+
+                // Thermal state badge
+                HStack(spacing: 8) {
+                    Circle()
+                        .fill(viewModel.thermalBadgeColor)
+                        .frame(width: 8, height: 8)
+                    Text(viewModel.thermalBadgeText)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 16)
+                .padding(.bottom, 14)
+                .help("Real-time Apple Silicon QoS & thermal pacing status.")
             }
-            .navigationTitle("RustDisk")
-            .navigationSplitViewColumnWidth(min: 210, ideal: 235)
-        } detail: {
+            .frame(width: 240)
+            .background(Color(red: 0.13, green: 0.13, blue: 0.14))
+
+            Rectangle()
+                .fill(Color.white.opacity(0.08))
+                .frame(width: 1)
+
+            // Right Detail Canvas
             VStack(spacing: 0) {
                 controlBar
                 if viewModel.isScanning {
                     scanProgressBanner
                 }
                 StorageHeaderView()
+                    .environmentObject(viewModel)
                 diagnosticRecoveryCard
                 Divider()
 
@@ -72,6 +122,7 @@ struct MainSplitView: View {
                 Divider()
                 footer
             }
+            .background(Color(red: 0.10, green: 0.10, blue: 0.11))
         }
         .sheet(isPresented: $viewModel.showingPermanentDeleteConfirmation) {
             CleanupConfirmationSheet()
@@ -98,24 +149,57 @@ struct MainSplitView: View {
         }
     }
 
-    private func tabRow(_ tab: NavigationTab) -> some View {
-        HStack {
-            Label(tab.rawValue, systemImage: tab.icon)
-            Spacer()
-            if viewModel.activeScanningCategory == tab || (viewModel.activeScanningCategory == .smartOverview && (tab == .safeCaches || tab == .projects)) {
-                ProgressView()
-                    .controlSize(.mini)
-            } else if case let .completed(count, bytes, _) = viewModel.status(for: tab), count > 0 {
-                Text(viewModel.byteCount(bytes))
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(Color.secondary.opacity(0.12))
-                    .clipShape(Capsule())
+    private func sidebarItem(_ tab: NavigationTab) -> some View {
+        let isSelected = viewModel.selectedTab == tab
+        let isHovered = hoveredTab == tab
+        let isActivelyScanning = viewModel.activeScanningCategory == tab || (viewModel.activeScanningCategory == .smartOverview && (tab == .safeCaches || tab == .projects))
+
+        return Button {
+            withAnimation(.easeInOut(duration: 0.15)) {
+                viewModel.selectedTab = tab
             }
+        } label: {
+            HStack(spacing: 9) {
+                Image(systemName: tab.icon)
+                    .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
+                    .foregroundStyle(isSelected ? Color.white : (isHovered ? Color.primary : Color.secondary))
+                    .frame(width: 18)
+
+                Text(tab.rawValue)
+                    .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
+                    .foregroundStyle(isSelected ? Color.white : Color.primary)
+
+                Spacer()
+
+                if isActivelyScanning {
+                    ProgressView()
+                        .controlSize(.mini)
+                } else if case let .completed(count, bytes, _) = viewModel.status(for: tab), count > 0 {
+                    Text(viewModel.byteCount(bytes))
+                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundStyle(isSelected ? Color.white : Color.secondary)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 2)
+                        .background(
+                            Capsule()
+                                .fill(isSelected ? Color.white.opacity(0.22) : Color.white.opacity(0.06))
+                        )
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .contentShape(Rectangle())
+            .background(
+                RoundedRectangle(cornerRadius: 7)
+                    .fill(isSelected ? Color.blue : (isHovered ? Color.white.opacity(0.05) : Color.clear))
+            )
         }
-        .tag(tab)
+        .buttonStyle(.plain)
+        .padding(.horizontal, 8)
+        .onHover { hovering in
+            hoveredTab = hovering ? tab : nil
+        }
     }
 
     private var controlBar: some View {
@@ -168,7 +252,7 @@ struct MainSplitView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
-        .background(.ultraThinMaterial)
+        .background(Color(red: 0.13, green: 0.13, blue: 0.14))
     }
 
     private var scanProgressBanner: some View {
@@ -203,7 +287,7 @@ struct MainSplitView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
-        .background(Color.accentColor.opacity(0.08))
+        .background(Color.accentColor.opacity(0.12))
     }
 
     @ViewBuilder
@@ -248,7 +332,7 @@ struct MainSplitView: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
-            .background(Color.orange.opacity(0.10))
+            .background(Color.orange.opacity(0.12))
         }
     }
 
@@ -308,7 +392,7 @@ struct MainSplitView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
-        .background(.ultraThinMaterial)
+        .background(Color(red: 0.13, green: 0.13, blue: 0.14))
     }
 }
 

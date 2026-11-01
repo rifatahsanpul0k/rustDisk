@@ -16,6 +16,7 @@ struct RustDiskApp: App {
             MainSplitView()
                 .environmentObject(viewModel)
                 .frame(minWidth: 980, minHeight: 640)
+                .preferredColorScheme(.dark)
         }
         .windowResizability(.contentSize)
         .commands {

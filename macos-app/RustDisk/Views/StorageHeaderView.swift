@@ -84,7 +84,7 @@ struct StorageHeaderView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
-        .background(.thinMaterial)
+        .background(Color(red: 0.12, green: 0.12, blue: 0.13))
     }
 
     private func legend(color: Color, title: String, value: String) -> some View {
