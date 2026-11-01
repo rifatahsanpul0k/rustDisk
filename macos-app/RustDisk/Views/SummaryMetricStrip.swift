@@ -49,9 +49,3 @@ struct SummaryMetricStrip: View {
         .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 }
-
-private extension UInt64 {
-    func saturatingAdding(_ other: UInt64) -> UInt64 {
-        addingReportingOverflow(other).partialValue
-    }
-}

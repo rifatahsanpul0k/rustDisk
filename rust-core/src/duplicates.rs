@@ -141,12 +141,10 @@ fn walk_files(root: &Path, min_size_bytes: u64, token: &ScanToken) -> Vec<FileCa
                 children.clear();
                 return;
             }
-            for child in children.iter_mut() {
-                if let Ok(entry) = child {
-                    let path = entry.path();
-                    if entry.file_type().is_dir() && should_skip_directory(&path) {
-                        entry.read_children_path = None;
-                    }
+            for entry in children.iter_mut().flatten() {
+                let path = entry.path();
+                if entry.file_type().is_dir() && should_skip_directory(&path) {
+                    entry.read_children_path = None;
                 }
             }
         });
@@ -637,7 +635,7 @@ fn folder_groups(
             }
             directory_candidates
                 .get(&directory)
-                .and_then(|files| directory_signature(&directory, files, &hashes))
+                .and_then(|files| directory_signature(&directory, files, hashes))
         })
         .collect();
     let mut by_signature: HashMap<String, Vec<DirectorySignature>> = HashMap::new();

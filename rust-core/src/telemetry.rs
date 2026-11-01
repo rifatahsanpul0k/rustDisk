@@ -16,9 +16,9 @@ pub fn get_disk_overview() -> DiskOverview {
         if result == 0 {
             let stats = unsafe { stats.assume_init() };
             let block_size = if stats.f_frsize > 0 {
-                stats.f_frsize as u64
+                stats.f_frsize
             } else {
-                stats.f_bsize as u64
+                stats.f_bsize
             };
             let total_bytes = (stats.f_blocks as u64).saturating_mul(block_size);
             let available_bytes = (stats.f_bavail as u64).saturating_mul(block_size);

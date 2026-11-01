@@ -60,19 +60,17 @@ pub fn thermal_pace_walk(counter: &mut u32) {
 
     match level {
         1 => {
-            if *counter % 500 == 0 {
+            if (*counter).is_multiple_of(500) {
                 std::thread::sleep(Duration::from_millis(1));
             }
         }
         2 => {
-            if *counter % 200 == 0 {
+            if (*counter).is_multiple_of(200) {
                 std::thread::sleep(Duration::from_millis(5));
             }
         }
-        3 => {
-            if *counter % 100 == 0 {
-                std::thread::sleep(Duration::from_millis(15));
-            }
+        3 if (*counter).is_multiple_of(100) => {
+            std::thread::sleep(Duration::from_millis(15));
         }
         _ => {}
     }
@@ -87,19 +85,17 @@ pub fn thermal_pace_hash(chunk_index: u32) {
 
     match level {
         1 => {
-            if chunk_index > 0 && chunk_index % 64 == 0 {
+            if chunk_index > 0 && chunk_index.is_multiple_of(64) {
                 std::thread::sleep(Duration::from_millis(1));
             }
         }
         2 => {
-            if chunk_index > 0 && chunk_index % 16 == 0 {
+            if chunk_index > 0 && chunk_index.is_multiple_of(16) {
                 std::thread::sleep(Duration::from_millis(5));
             }
         }
-        3 => {
-            if chunk_index > 0 && chunk_index % 8 == 0 {
-                std::thread::sleep(Duration::from_millis(15));
-            }
+        3 if chunk_index > 0 && chunk_index.is_multiple_of(8) => {
+            std::thread::sleep(Duration::from_millis(15));
         }
         _ => {}
     }

@@ -376,11 +376,11 @@ private struct ProjectArtifactRow: View {
             }
             Divider()
             Button("Copy Path", systemImage: "doc.on.doc") {
-                copy(item.path)
+                Clipboard.copy(item.path)
             }
             if !item.restoreHint.isEmpty {
                 Button("Copy Rebuild Command (\(item.restoreHint))", systemImage: "terminal") {
-                    copy(item.restoreHint)
+                    Clipboard.copy(item.restoreHint)
                 }
             }
         }
@@ -437,7 +437,7 @@ private struct ProjectArtifactRow: View {
 
                 if !item.restoreHint.isEmpty {
                     Button("Copy Rebuild", systemImage: "terminal") {
-                        copy(item.restoreHint)
+                        Clipboard.copy(item.restoreHint)
                     }
                     .buttonStyle(.bordered)
                 }
@@ -463,16 +463,5 @@ private struct ProjectArtifactRow: View {
                 .font(.callout)
                 .textSelection(.enabled)
         }
-    }
-
-    private func copy(_ value: String) {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(value, forType: .string)
-    }
-}
-
-private extension UInt64 {
-    func saturatingAdding(_ other: UInt64) -> UInt64 {
-        addingReportingOverflow(other).partialValue
     }
 }

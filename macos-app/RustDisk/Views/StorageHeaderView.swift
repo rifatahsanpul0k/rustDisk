@@ -99,9 +99,3 @@ struct StorageHeaderView: View {
         }
     }
 }
-
-private extension UInt64 {
-    func saturatingSubtracting(_ other: UInt64) -> UInt64 {
-        self >= other ? self - other : 0
-    }
-}

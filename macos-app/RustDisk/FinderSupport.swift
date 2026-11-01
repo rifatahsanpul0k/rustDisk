@@ -20,3 +20,21 @@ enum FinderSupport {
         }
     }
 }
+
+extension UInt64 {
+    func saturatingAdding(_ other: UInt64) -> UInt64 {
+        let (sum, overflow) = addingReportingOverflow(other)
+        return overflow ? .max : sum
+    }
+
+    func saturatingSubtracting(_ other: UInt64) -> UInt64 {
+        self >= other ? self - other : 0
+    }
+}
+
+enum Clipboard {
+    static func copy(_ text: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+    }
+}

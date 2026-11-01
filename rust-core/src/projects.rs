@@ -197,17 +197,14 @@ fn discover_artifact_directories(root_path: &Path, token: &ScanToken) -> Vec<Art
                 children.clear();
                 return;
             }
-            for child in children.iter_mut() {
-                if let Ok(entry) = child {
-                    let name = entry.file_name.to_string_lossy();
-                    if is_ignored_discovery_name(&name) {
-                        entry.read_children_path = None;
-                    } else if is_artifact_name(&name) && classify_artifact(&entry.path()).is_some()
-                    {
-                        // Measure this artifact as a single unit. Its nested dependency trees
-                        // are included in its footprint and must not become separate entries.
-                        entry.read_children_path = None;
-                    }
+            for entry in children.iter_mut().flatten() {
+                let name = entry.file_name.to_string_lossy();
+                if is_ignored_discovery_name(&name) {
+                    entry.read_children_path = None;
+                } else if is_artifact_name(&name) && classify_artifact(&entry.path()).is_some() {
+                    // Measure this artifact as a single unit. Its nested dependency trees
+                    // are included in its footprint and must not become separate entries.
+                    entry.read_children_path = None;
                 }
             }
         });
@@ -244,12 +241,10 @@ fn most_recent_source_modification(project_root: &Path, token: &ScanToken) -> Sy
                 children.clear();
                 return;
             }
-            for child in children.iter_mut() {
-                if let Ok(entry) = child {
-                    let name = entry.file_name.to_string_lossy();
-                    if is_ignored_activity_name(&name) {
-                        entry.read_children_path = None;
-                    }
+            for entry in children.iter_mut().flatten() {
+                let name = entry.file_name.to_string_lossy();
+                if is_ignored_activity_name(&name) {
+                    entry.read_children_path = None;
                 }
             }
         });
@@ -374,7 +369,7 @@ fn scan_project_artifacts_impl(
     if token.is_cancelled() {
         return Vec::new();
     }
-    items.sort_by(|left, right| right.physical_bytes.cmp(&left.physical_bytes));
+    items.sort_by_key(|left| std::cmp::Reverse(left.physical_bytes));
     items
 }
 

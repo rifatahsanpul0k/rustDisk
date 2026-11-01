@@ -67,6 +67,7 @@ fn installed_on_request_from_receipts(version_paths: &[PathBuf]) -> bool {
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn package_from_measurement(
     path: &Path,
     name: String,
@@ -380,7 +381,7 @@ fn scan_packages_from_roots(
     let mut seen = HashSet::new();
     packages.retain(|package| seen.insert(package.id.clone()));
     packages.retain(|package| package.physical_bytes > 0 || package.logical_bytes > 0);
-    packages.sort_by(|left, right| right.physical_bytes.cmp(&left.physical_bytes));
+    packages.sort_by_key(|left| std::cmp::Reverse(left.physical_bytes));
     packages
 }
 

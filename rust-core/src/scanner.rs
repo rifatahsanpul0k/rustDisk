@@ -330,7 +330,7 @@ pub(crate) fn scan_cache_sources(sources: &[CacheSource], token: &ScanToken) -> 
 
     let mut seen_paths = HashSet::new();
     items.retain(|item| seen_paths.insert(item.path.clone()));
-    items.sort_by(|left, right| right.physical_bytes.cmp(&left.physical_bytes));
+    items.sort_by_key(|left| std::cmp::Reverse(left.physical_bytes));
     items
 }
 
@@ -560,15 +560,13 @@ fn scan_large_files_from_roots(
                     children.clear();
                     return;
                 }
-                for child in children.iter_mut() {
-                    if let Ok(entry) = child {
-                        let path = entry.path();
-                        if should_skip_large_file_path(&path)
-                            || is_macos_bundle(&path)
-                            || (!include_dev_caches && is_known_dev_cache_or_runtime(&path))
-                        {
-                            entry.read_children_path = None;
-                        }
+                for entry in children.iter_mut().flatten() {
+                    let path = entry.path();
+                    if should_skip_large_file_path(&path)
+                        || is_macos_bundle(&path)
+                        || (!include_dev_caches && is_known_dev_cache_or_runtime(&path))
+                    {
+                        entry.read_children_path = None;
                     }
                 }
             });
@@ -623,7 +621,7 @@ fn scan_large_files_from_roots(
     if token.is_cancelled() {
         return Vec::new();
     }
-    items.sort_by(|left, right| right.physical_bytes.cmp(&left.physical_bytes));
+    items.sort_by_key(|left| std::cmp::Reverse(left.physical_bytes));
     items
 }
 

@@ -279,9 +279,3 @@ private struct CacheCategoryGroup: Identifiable {
 
     var id: String { category }
 }
-
-private extension UInt64 {
-    func saturatingAdding(_ other: UInt64) -> UInt64 {
-        addingReportingOverflow(other).partialValue
-    }
-}

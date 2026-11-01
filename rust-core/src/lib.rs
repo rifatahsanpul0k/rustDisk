@@ -18,7 +18,7 @@ pub(crate) fn configure_scan_thread_pool() {
         let cores = std::thread::available_parallelism()
             .map(|count| count.get())
             .unwrap_or(2);
-        let threads = cores.min(2).max(1);
+        let threads = cores.clamp(1, 2);
         let _ = rayon::ThreadPoolBuilder::new()
             .num_threads(threads)
             .thread_name(|index| format!("rustdisk-scan-{index}"))

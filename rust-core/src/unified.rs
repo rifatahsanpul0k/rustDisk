@@ -84,26 +84,24 @@ pub(crate) fn scan_full_audit_impl(
                     children.clear();
                     return;
                 }
-                for child in children.iter_mut() {
-                    if let Ok(entry) = child {
-                        let path = entry.path();
-                        if entry.file_type().is_dir() {
-                            let name = entry.file_name.to_string_lossy();
-                            if crate::scanner::should_skip_large_file_path(&path)
-                                || crate::scanner::is_macos_bundle(&path)
-                                || crate::projects::is_ignored_discovery_name(&name)
-                            {
-                                entry.read_children_path = None;
-                            } else if crate::projects::is_artifact_name(&name)
-                                && crate::projects::classify_artifact(&path).is_some()
-                            {
-                                // Prune descent: this is a manifest-verified project artifact
-                                entry.read_children_path = None;
-                            } else if !include_dev_caches
-                                && crate::scanner::is_known_dev_cache_or_runtime(&path)
-                            {
-                                entry.read_children_path = None;
-                            }
+                for entry in children.iter_mut().flatten() {
+                    let path = entry.path();
+                    if entry.file_type().is_dir() {
+                        let name = entry.file_name.to_string_lossy();
+                        if crate::scanner::should_skip_large_file_path(&path)
+                            || crate::scanner::is_macos_bundle(&path)
+                            || crate::projects::is_ignored_discovery_name(&name)
+                        {
+                            entry.read_children_path = None;
+                        } else if crate::projects::is_artifact_name(&name)
+                            && crate::projects::classify_artifact(&path).is_some()
+                        {
+                            // Prune descent: this is a manifest-verified project artifact
+                            entry.read_children_path = None;
+                        } else if !include_dev_caches
+                            && crate::scanner::is_known_dev_cache_or_runtime(&path)
+                        {
+                            entry.read_children_path = None;
                         }
                     }
                 }
@@ -156,58 +154,54 @@ pub(crate) fn scan_full_audit_impl(
             };
 
             // Tab 4 (Large Files)
-            if physical_bytes >= large_threshold {
-                if include_dev_caches || !crate::scanner::is_known_dev_cache_or_runtime(&path) {
-                    if seen_large_file_inodes.insert((device, inode)) {
-                        let category = crate::scanner::category_for_large_file(&path);
-                        let risk =
-                            crate::scanner::risk_for_large_file(&path, &root_path_buf, category);
-                        let name = path
-                            .file_name()
-                            .map(|v| v.to_string_lossy().into_owned())
-                            .unwrap_or_else(|| path.to_string_lossy().into_owned());
-                        let path_str = path.to_string_lossy().into_owned();
-                        let days = SystemTime::now()
-                            .duration_since(modified)
-                            .unwrap_or(Duration::ZERO)
-                            .as_secs()
-                            / 86_400;
+            if physical_bytes >= large_threshold
+                && (include_dev_caches || !crate::scanner::is_known_dev_cache_or_runtime(&path))
+                && seen_large_file_inodes.insert((device, inode))
+            {
+                let category = crate::scanner::category_for_large_file(&path);
+                let risk = crate::scanner::risk_for_large_file(&path, &root_path_buf, category);
+                let name = path
+                    .file_name()
+                    .map(|v| v.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| path.to_string_lossy().into_owned());
+                let path_str = path.to_string_lossy().into_owned();
+                let days = SystemTime::now()
+                    .duration_since(modified)
+                    .unwrap_or(Duration::ZERO)
+                    .as_secs()
+                    / 86_400;
 
-                        large_files.push(ScannedItem {
-                            id: path_str.clone(),
-                            name,
-                            path: path_str,
-                            physical_bytes,
-                            logical_bytes,
-                            category: category.to_owned(),
-                            risk,
-                            activity: ProjectActivity::NotProject,
-                            days_since_modified: days,
-                            ecosystem: String::new(),
-                            project_root: String::new(),
-                            restore_hint: String::new(),
-                            has_git: false,
-                        });
-                    }
-                }
+                large_files.push(ScannedItem {
+                    id: path_str.clone(),
+                    name,
+                    path: path_str,
+                    physical_bytes,
+                    logical_bytes,
+                    category: category.to_owned(),
+                    risk,
+                    activity: ProjectActivity::NotProject,
+                    days_since_modified: days,
+                    ecosystem: String::new(),
+                    project_root: String::new(),
+                    restore_hint: String::new(),
+                    has_git: false,
+                });
             }
 
             // Tab 5 (Duplicates Candidate)
-            if physical_bytes >= duplicate_min_bytes {
-                if !crate::duplicates::is_protected_path(&path)
-                    && !crate::duplicates::is_bundle(&path)
-                {
-                    if seen_duplicate_inodes.insert((device, inode)) {
-                        duplicate_candidates.push(FileCandidate {
-                            path: path.clone(),
-                            physical_bytes,
-                            logical_bytes,
-                            modified,
-                            device,
-                            inode,
-                        });
-                    }
-                }
+            if physical_bytes >= duplicate_min_bytes
+                && !crate::duplicates::is_protected_path(&path)
+                && !crate::duplicates::is_bundle(&path)
+                && seen_duplicate_inodes.insert((device, inode))
+            {
+                duplicate_candidates.push(FileCandidate {
+                    path: path.clone(),
+                    physical_bytes,
+                    logical_bytes,
+                    modified,
+                    device,
+                    inode,
+                });
             }
         }
     }
@@ -216,8 +210,8 @@ pub(crate) fn scan_full_audit_impl(
         return empty_report(disk_overview);
     }
 
-    large_files.sort_by(|left, right| right.physical_bytes.cmp(&left.physical_bytes));
-    project_artifacts.sort_by(|left, right| right.physical_bytes.cmp(&left.physical_bytes));
+    large_files.sort_by_key(|left| std::cmp::Reverse(left.physical_bytes));
+    project_artifacts.sort_by_key(|left| std::cmp::Reverse(left.physical_bytes));
 
     // 3. Run Duplicate Stage 2, Stage 3, folder rollup, and package duplicates
     let system_roots = SystemRoots::for_scan_root(&root_path_buf);

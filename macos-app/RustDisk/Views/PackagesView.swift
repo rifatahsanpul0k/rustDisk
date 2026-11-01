@@ -361,10 +361,10 @@ private struct PackageRow: View {
             }
             Divider()
             Button("Copy Uninstall Command", systemImage: "terminal") {
-                copy(package.uninstallCmd)
+                Clipboard.copy(package.uninstallCmd)
             }
             Button("Copy Path", systemImage: "doc.on.doc") {
-                copy(package.path)
+                Clipboard.copy(package.path)
             }
         }
     }
@@ -425,7 +425,7 @@ private struct PackageRow: View {
                 .buttonStyle(.bordered)
 
                 Button("Copy Command", systemImage: "terminal") {
-                    copy(package.uninstallCmd)
+                    Clipboard.copy(package.uninstallCmd)
                 }
                 .buttonStyle(.bordered)
 
@@ -450,16 +450,5 @@ private struct PackageRow: View {
                 .font(.callout)
                 .textSelection(.enabled)
         }
-    }
-
-    private func copy(_ value: String) {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(value, forType: .string)
-    }
-}
-
-private extension UInt64 {
-    func saturatingAdding(_ other: UInt64) -> UInt64 {
-        addingReportingOverflow(other).partialValue
     }
 }

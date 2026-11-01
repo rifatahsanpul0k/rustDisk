@@ -398,7 +398,7 @@ private struct LargeFileRow: View {
                     NSWorkspace.shared.open(URL(fileURLWithPath: item.path))
                 }
                 Button("Copy Path", systemImage: "doc.on.doc") {
-                    copyPath()
+                    Clipboard.copy(item.path)
                 }
             } else {
                 Button("Open Terminal Packages", systemImage: "terminal") {
@@ -552,16 +552,5 @@ private struct LargeFileRow: View {
 
     private func revealInFinder() {
         FinderSupport.reveal(path: item.path)
-    }
-
-    private func copyPath() {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(item.path, forType: .string)
-    }
-}
-
-private extension UInt64 {
-    func saturatingAdding(_ other: UInt64) -> UInt64 {
-        addingReportingOverflow(other).partialValue
     }
 }
