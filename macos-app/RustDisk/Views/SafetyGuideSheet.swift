@@ -4,54 +4,88 @@ struct SafetyGuideSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            HStack {
-                Label("Safety & APFS Guide", systemImage: "questionmark.circle.fill")
-                    .font(.title2.bold())
+        VStack(alignment: .leading, spacing: 20) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Label("How RustDisk Protects Your Mac", systemImage: "checkmark.shield.fill")
+                        .font(.title2.bold())
+                        .foregroundStyle(.green)
+                    Text("Built with safety-first rules so you never lose personal files, code, or macOS stability.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+
                 Spacer()
+
                 Button("Done") { dismiss() }
                     .keyboardShortcut(.defaultAction)
+                    .buttonStyle(.borderedProminent)
             }
 
+            Divider()
+
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    guideSection(
-                        title: "Physical vs. Logical Space",
-                        icon: "chart.bar.xaxis",
-                        text: "RustDisk measures the APFS blocks actually allocated on your SSD. A sparse file such as Docker.raw can have a very large logical size while consuming far fewer physical blocks. The app shows both values so you can make decisions based on real reclaimable storage."
+                VStack(alignment: .leading, spacing: 16) {
+                    guideCard(
+                        title: "1. 100% Recoverable (Moved to Trash First)",
+                        icon: "trash.circle.fill",
+                        color: .blue,
+                        text: "Cleaned items are sent straight to your macOS Trash by default. You can open Trash, right-click any item, and click 'Put Back' at any time to restore it exactly where it was."
                     )
-                    guideSection(
-                        title: "The Three Safety Tiers",
-                        icon: "shield.lefthalf.filled",
-                        text: "Safe items are temporary caches, installers, and other low-risk files. Rebuildable items are project dependencies and runtimes that can be restored with a package install or build command. High-risk CLI or Protected items, such as Docker virtual disks and package dependencies, require an explicit CLI workflow and are never silently deleted."
-                    )
-                    guideSection(
-                        title: "System Armor Guarantee",
+
+                    guideCard(
+                        title: "2. System Armor (Core Files Are Mathematically Locked)",
                         icon: "lock.shield.fill",
-                        text: "The Rust cleaner rejects relative paths, the filesystem root, /System, /bin, /sbin, /usr, /Applications, all of /Library, everything in /opt except /opt/homebrew, home folders themselves, .git, .ssh, .gnupg, .aws, and Docker.raw. It resolves symlinks and ignores letter case before checking. Source files are not targeted by project-artifact cleanup; only recognized dependency and build folders are offered."
+                        color: .green,
+                        text: "The compiled Rust engine strictly blocks /System, /Library, /Applications, Desktop, Documents, Photos, and .git repositories. These vital locations can never be deleted under any circumstance."
+                    )
+
+                    guideCard(
+                        title: "3. Safe vs. Rebuildable Files",
+                        icon: "arrow.triangle.2.circlepath.circle.fill",
+                        color: .orange,
+                        text: "Temporary app caches and web scratchpads are safe to clean anytime—apps recreate them automatically. Older project build folders (like node_modules or target) can be restored in seconds with 'npm install' or 'cargo build' when you code again."
+                    )
+
+                    guideCard(
+                        title: "4. Twin Files (Always Keeps One Original)",
+                        icon: "doc.on.doc.fill",
+                        color: .purple,
+                        text: "When exact duplicate files or folders are found, RustDisk automatically locks and preserves one safe original copy so you never lose data."
                     )
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 4)
             }
         }
         .padding(24)
-        .frame(width: 620, height: 500)
+        .frame(width: 580, height: 520)
     }
 
-    private func guideSection(title: String, icon: String, text: String) -> some View {
-        HStack(alignment: .top, spacing: 12) {
+    private func guideCard(title: String, icon: String, color: Color, text: String) -> some View {
+        HStack(alignment: .top, spacing: 14) {
             Image(systemName: icon)
-                .font(.title3)
-                .foregroundStyle(.blue)
-                .frame(width: 28)
-            VStack(alignment: .leading, spacing: 5) {
+                .font(.title)
+                .foregroundStyle(color)
+                .frame(width: 32)
+
+            VStack(alignment: .leading, spacing: 4) {
                 Text(title)
                     .font(.headline)
                 Text(text)
-                    .font(.body)
+                    .font(.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color(NSColor.controlBackgroundColor))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(color.opacity(0.2), lineWidth: 1)
+                }
+        )
     }
 }

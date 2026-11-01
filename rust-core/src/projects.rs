@@ -8,8 +8,8 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
 const DAY_SECONDS: u64 = 86_400;
-const DEFAULT_STALE_THRESHOLD_DAYS: u64 = 30;
-const MIN_ARTIFACT_PHYSICAL_BYTES: u64 = 5 * 1024 * 1024;
+pub(crate) const DEFAULT_STALE_THRESHOLD_DAYS: u64 = 30;
+pub(crate) const MIN_ARTIFACT_PHYSICAL_BYTES: u64 = 5 * 1024 * 1024;
 const MAX_PROJECT_CONTEXT_ANCESTORS: usize = 3;
 
 const IGNORED_DISCOVERY_TREES: [&str; 4] = [".git", ".Trash", "Library", "System"];
@@ -47,11 +47,11 @@ enum ManifestRequirement {
 }
 
 #[derive(Clone, Debug)]
-struct ProjectContext {
-    root: PathBuf,
-    ecosystem: &'static str,
-    restore_hint: String,
-    has_git: bool,
+pub(crate) struct ProjectContext {
+    pub(crate) root: PathBuf,
+    pub(crate) ecosystem: &'static str,
+    pub(crate) restore_hint: String,
+    pub(crate) has_git: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -156,7 +156,7 @@ fn find_project_context(
     None
 }
 
-fn classify_artifact(path: &Path) -> Option<ProjectContext> {
+pub(crate) fn classify_artifact(path: &Path) -> Option<ProjectContext> {
     let name = path.file_name()?.to_string_lossy();
     let requirement = match name.as_ref() {
         "node_modules" | ".next" | ".nuxt" | ".turbo" | ".parcel-cache" | ".vite" => {
@@ -175,7 +175,7 @@ fn classify_artifact(path: &Path) -> Option<ProjectContext> {
     find_project_context(path, requirement)
 }
 
-fn is_ignored_discovery_name(name: &str) -> bool {
+pub(crate) fn is_ignored_discovery_name(name: &str) -> bool {
     IGNORED_DISCOVERY_TREES.contains(&name)
 }
 
@@ -183,7 +183,7 @@ fn is_ignored_activity_name(name: &str) -> bool {
     matches!(name, ".git" | ".Trash") || is_artifact_name(name)
 }
 
-fn is_artifact_name(name: &str) -> bool {
+pub(crate) fn is_artifact_name(name: &str) -> bool {
     ARTIFACT_NAMES.contains(&name)
 }
 
@@ -306,12 +306,55 @@ pub fn scan_project_artifacts(root_path: String, stale_threshold_days: u64) -> V
     scan_project_artifacts_impl(&root_path, stale_threshold_days, &token)
 }
 
+pub(crate) fn build_project_scanned_item(
+    artifact_path: &Path,
+    context: &ProjectContext,
+    stale_threshold_days: u64,
+    token: &ScanToken,
+) -> Option<ScannedItem> {
+    let (physical_bytes, logical_bytes) = calculate_dir_footprint_cancellable(artifact_path, token);
+    if physical_bytes < MIN_ARTIFACT_PHYSICAL_BYTES {
+        return None;
+    }
+
+    let (activity, days_since_modified) =
+        check_project_activity(&context.root, stale_threshold_days, token);
+    if token.is_cancelled() {
+        return None;
+    }
+    let project_name = context
+        .root
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "Unknown Project".to_owned());
+    let artifact_name = artifact_path.file_name()?.to_string_lossy().into_owned();
+    let path = artifact_path.to_string_lossy().into_owned();
+    let project_root = context.root.to_string_lossy().into_owned();
+
+    Some(ScannedItem {
+        id: path.clone(),
+        name: format!("{project_name} ({artifact_name})"),
+        path,
+        physical_bytes,
+        logical_bytes,
+        category: artifact_name,
+        risk: RiskTier::Rebuildable,
+        activity,
+        days_since_modified,
+        ecosystem: context.ecosystem.to_owned(),
+        project_root,
+        restore_hint: context.restore_hint.clone(),
+        has_git: context.has_git,
+    })
+}
+
 fn scan_project_artifacts_impl(
     root_path: &str,
     stale_threshold_days: u64,
     token: &ScanToken,
 ) -> Vec<ScannedItem> {
     crate::configure_scan_thread_pool();
+    crate::thermal::apply_current_thread_thermal_policy();
     let found_dirs = discover_artifact_directories(Path::new(root_path), token);
     let mut items: Vec<ScannedItem> = found_dirs
         .par_iter()
@@ -319,42 +362,12 @@ fn scan_project_artifacts_impl(
             if token.is_cancelled() {
                 return None;
             }
-            let (physical_bytes, logical_bytes) =
-                calculate_dir_footprint_cancellable(&artifact.path, token);
-            if physical_bytes < MIN_ARTIFACT_PHYSICAL_BYTES {
-                return None;
-            }
-
-            let (activity, days_since_modified) =
-                check_project_activity(&artifact.context.root, stale_threshold_days, token);
-            if token.is_cancelled() {
-                return None;
-            }
-            let project_name = artifact
-                .context
-                .root
-                .file_name()
-                .map(|name| name.to_string_lossy().into_owned())
-                .unwrap_or_else(|| "Unknown Project".to_owned());
-            let artifact_name = artifact.path.file_name()?.to_string_lossy().into_owned();
-            let path = artifact.path.to_string_lossy().into_owned();
-            let project_root = artifact.context.root.to_string_lossy().into_owned();
-
-            Some(ScannedItem {
-                id: path.clone(),
-                name: format!("{project_name} ({artifact_name})"),
-                path,
-                physical_bytes,
-                logical_bytes,
-                category: artifact_name,
-                risk: RiskTier::Rebuildable,
-                activity,
-                days_since_modified,
-                ecosystem: artifact.context.ecosystem.to_owned(),
-                project_root,
-                restore_hint: artifact.context.restore_hint.clone(),
-                has_git: artifact.context.has_git,
-            })
+            build_project_scanned_item(
+                &artifact.path,
+                &artifact.context,
+                stale_threshold_days,
+                token,
+            )
         })
         .collect();
 

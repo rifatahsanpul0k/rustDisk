@@ -32,6 +32,7 @@ pub(crate) fn calculate_dir_footprint_cancellable(dir: &Path, token: &ScanToken)
     let mut physical = 0u64;
     let mut logical = 0u64;
     let walk_token = token.clone();
+    let mut walk_counter = 0u32;
 
     // Serial on purpose. This runs inside rayon `par_iter` closures on a pool
     // capped at two threads. jwalk's default mode would spawn onto that same
@@ -53,6 +54,7 @@ pub(crate) fn calculate_dir_footprint_cancellable(dir: &Path, token: &ScanToken)
         if token.is_cancelled() {
             break;
         }
+        crate::thermal::thermal_pace_walk(&mut walk_counter);
         if entry.file_type().is_file() {
             if let Some((file_physical, file_logical)) = calculate_file_footprint(&entry.path()) {
                 physical = physical.saturating_add(file_physical);
@@ -76,7 +78,7 @@ fn days_since_modified(path: &Path) -> u64 {
         / DAY_SECONDS
 }
 
-fn item_for_path(
+pub(crate) fn item_for_path(
     path: &Path,
     category: &str,
     risk: RiskTier,
@@ -130,13 +132,13 @@ fn direct_children(root: &Path, directories_only: bool) -> Vec<PathBuf> {
 }
 
 #[derive(Clone)]
-struct CacheSource {
-    root: PathBuf,
-    category: &'static str,
-    risk: RiskTier,
-    enumerate_children: bool,
-    directories_only: bool,
-    minimum_physical_bytes: u64,
+pub(crate) struct CacheSource {
+    pub(crate) root: PathBuf,
+    pub(crate) category: &'static str,
+    pub(crate) risk: RiskTier,
+    pub(crate) enumerate_children: bool,
+    pub(crate) directories_only: bool,
+    pub(crate) minimum_physical_bytes: u64,
 }
 
 fn cache_source(
@@ -177,7 +179,7 @@ fn library_cache_category(path: &Path) -> &'static str {
     }
 }
 
-fn safe_cache_sources(home_dir: &Path) -> Vec<CacheSource> {
+pub(crate) fn safe_cache_sources(home_dir: &Path) -> Vec<CacheSource> {
     const FIVE_MIB: u64 = 5 * 1024 * 1024;
 
     vec![
@@ -288,7 +290,8 @@ fn safe_cache_sources(home_dir: &Path) -> Vec<CacheSource> {
     ]
 }
 
-fn scan_cache_sources(sources: &[CacheSource], token: &ScanToken) -> Vec<ScannedItem> {
+pub(crate) fn scan_cache_sources(sources: &[CacheSource], token: &ScanToken) -> Vec<ScannedItem> {
+    crate::thermal::apply_current_thread_thermal_policy();
     let mut items: Vec<ScannedItem> = sources
         .par_iter()
         .flat_map_iter(|source| {
@@ -331,13 +334,18 @@ fn scan_cache_sources(sources: &[CacheSource], token: &ScanToken) -> Vec<Scanned
     items
 }
 
+pub(crate) fn scan_safe_caches_with_token(home: &Path, token: &ScanToken) -> Vec<ScannedItem> {
+    scan_cache_sources(&safe_cache_sources(home), token)
+}
+
 /// Scans known rebuildable cache locations under the current user's home directory.
 #[uniffi::export]
 pub fn scan_safe_caches(home_dir: String) -> Vec<ScannedItem> {
     let token = ScanToken::begin();
     crate::configure_scan_thread_pool();
+    crate::thermal::apply_current_thread_thermal_policy();
     let home = Path::new(&home_dir);
-    scan_cache_sources(&safe_cache_sources(home), &token)
+    scan_safe_caches_with_token(home, &token)
 }
 
 /// The only part of `/opt` the large-file scan enters. System Armor refuses to
@@ -346,13 +354,17 @@ pub fn scan_safe_caches(home_dir: String) -> Vec<ScannedItem> {
 const HOMEBREW_PREFIX: &str = "/opt/homebrew";
 
 /// Where the large-file scan looks: the home folder, plus Homebrew's prefix.
-fn large_file_roots(home_root: &Path) -> Vec<PathBuf> {
-    vec![home_root.to_path_buf(), PathBuf::from(HOMEBREW_PREFIX)]
+pub(crate) fn large_file_roots(home_root: &Path) -> Vec<PathBuf> {
+    if home_root == Path::new("/") || home_root.starts_with("/Users/") {
+        vec![home_root.to_path_buf(), PathBuf::from(HOMEBREW_PREFIX)]
+    } else {
+        vec![home_root.to_path_buf()]
+    }
 }
 
 /// Paths the large-file scan never lists or descends into. Keep this in step
 /// with the deletion guardrails in `cleaner::SystemArmor`.
-fn should_skip_large_file_path(path: &Path) -> bool {
+pub(crate) fn should_skip_large_file_path(path: &Path) -> bool {
     // `/usr` entirely (it covers `/usr/bin` and `/usr/local`).
     const PROTECTED_ROOTS: [&str; 5] = ["/System", "/bin", "/sbin", "/usr", "/.Trash"];
 
@@ -405,7 +417,7 @@ fn has_path_component(path: &Path, name: &str) -> bool {
         .any(|component| component.as_os_str() == name)
 }
 
-fn is_macos_bundle(path: &Path) -> bool {
+pub(crate) fn is_macos_bundle(path: &Path) -> bool {
     let name = path
         .file_name()
         .map(|value| value.to_string_lossy().to_ascii_lowercase())
@@ -413,7 +425,7 @@ fn is_macos_bundle(path: &Path) -> bool {
     BUNDLE_SUFFIXES.iter().any(|suffix| name.ends_with(suffix))
 }
 
-fn is_known_dev_cache_or_runtime(path: &Path) -> bool {
+pub(crate) fn is_known_dev_cache_or_runtime(path: &Path) -> bool {
     const KNOWN_ROOT_SUFFIXES: [&str; 22] = [
         "Library/Caches",
         "Library/Logs",
@@ -455,7 +467,7 @@ fn is_known_dev_cache_or_runtime(path: &Path) -> bool {
         || path.starts_with("/usr/local/Caskroom")
 }
 
-fn category_for_large_file(path: &Path) -> &'static str {
+pub(crate) fn category_for_large_file(path: &Path) -> &'static str {
     let extension = path
         .extension()
         .map(|value| value.to_string_lossy().to_ascii_lowercase())
@@ -508,7 +520,7 @@ fn category_for_large_file(path: &Path) -> &'static str {
     }
 }
 
-fn risk_for_large_file(path: &Path, home_root: &Path, category: &str) -> RiskTier {
+pub(crate) fn risk_for_large_file(path: &Path, home_root: &Path, category: &str) -> RiskTier {
     if category == "Virtual Machines & Disks" {
         RiskTier::HighRiskCli
     } else if category == "Disk Images & Installers"
@@ -529,6 +541,7 @@ fn scan_large_files_from_roots(
 ) -> Vec<ScannedItem> {
     let mut items = Vec::new();
     let mut seen_inodes = HashSet::new();
+    let mut walk_counter = 0u32;
 
     for root in roots {
         if token.is_cancelled() {
@@ -564,6 +577,7 @@ fn scan_large_files_from_roots(
             if token.is_cancelled() {
                 return Vec::new();
             }
+            crate::thermal::thermal_pace_walk(&mut walk_counter);
             let path = entry.path();
 
             if !entry.file_type().is_file()
@@ -620,6 +634,7 @@ fn scan_large_files_impl(
     token: &ScanToken,
 ) -> Vec<ScannedItem> {
     crate::configure_scan_thread_pool();
+    crate::thermal::apply_current_thread_thermal_policy();
     let home_root = PathBuf::from(&root_path);
     let roots = large_file_roots(&home_root);
     scan_large_files_from_roots(

@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 enum PackageManagerFilter: String, CaseIterable, Identifiable {
-    case all = "All"
+    case all = "All Tools"
     case homebrewFormula = "Homebrew Formula"
     case homebrewCask = "Homebrew Cask"
     case pythonConda = "Python & Conda"
@@ -37,10 +37,9 @@ struct PackagesView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            filterBar
+            headerBanner
+            toolbar
             PackageSummaryMetricStrip()
-            Divider()
-            maintenanceBar
             Divider()
 
             List(selection: $viewModel.selectedIDs) {
@@ -49,90 +48,188 @@ struct PackagesView: View {
                         .tag(package.id)
                 }
             }
+            .listStyle(.inset(alternatesRowBackgrounds: true))
             .overlay {
-                if viewModel.terminalPackages.isEmpty {
-                    EmptyStateView(
-                        title: "No terminal packages found",
-                        systemImage: "terminal",
-                        message: "RustDisk checks Homebrew, Python/Conda, Node, Rust toolchains, and container virtual disks."
-                    )
-                } else if filteredPackages.isEmpty {
-                    EmptyStateView(
-                        title: "No matching packages",
-                        systemImage: "line.3.horizontal.decrease.circle",
-                        message: "Try another manager, package name, path, or filter toggle."
-                    )
-                }
-            }
-        }
-    }
+                switch viewModel.status(for: .packages) {
+                case .notScanned:
+                    VStack(spacing: 14) {
+                        EmptyStateView(
+                            title: "Apps & Dev Tools Not Scanned Yet",
+                            systemImage: "shippingbox.fill",
+                            message: "Scan your Mac to check Homebrew packages, Python environments, Node versions, and Docker virtual disks."
+                        )
+                        Button {
+                            viewModel.scanCategory(.packages)
+                        } label: {
+                            Label("Scan Apps & Dev Tools", systemImage: "magnifyingglass")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.teal)
+                        .controlSize(.large)
+                        .disabled(viewModel.isWorking)
+                    }
 
-    private var filterBar: some View {
-        VStack(spacing: 9) {
-            HStack(spacing: 10) {
-                Label("Terminal Packages", systemImage: "terminal.fill")
-                    .font(.headline)
-                Text("CLI tools and runtimes installed outside the macOS Applications folder.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-                TextField("Search name, manager, path, or command", text: $searchText)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(maxWidth: 330)
-                Spacer()
-                Toggle("Explicitly Installed Only", isOn: $explicitOnly)
-                    .toggleStyle(.checkbox)
-                Toggle("Multi-Version / Bloat Only", isOn: $multiVersionOnly)
-                    .toggleStyle(.checkbox)
-            }
+                case .scanning:
+                    VStack(spacing: 12) {
+                        ProgressView()
+                            .controlSize(.regular)
+                        Text("Auditing Developer Tools…")
+                            .font(.headline)
+                        Text("Querying package receipts and checking virtual disk allocations.")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                        Button(role: .cancel) {
+                            viewModel.cancelScan()
+                        } label: {
+                            Label("Stop Scan", systemImage: "xmark.circle")
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(.red)
+                    }
 
-            HStack(spacing: 10) {
-                Text("Manager")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Picker("Manager", selection: $managerFilter) {
-                    ForEach(PackageManagerFilter.allCases) { filter in
-                        Text(filter.rawValue).tag(filter)
+                case .completed:
+                    if viewModel.terminalPackages.isEmpty {
+                        VStack(spacing: 12) {
+                            EmptyStateView(
+                                title: "No developer packages found",
+                                systemImage: "checkmark.seal.fill",
+                                message: "No CLI packages or virtual disks detected in standard locations."
+                            )
+                            Button {
+                                viewModel.scanCategory(.packages)
+                            } label: {
+                                Label("Scan Again", systemImage: "arrow.clockwise")
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                    } else if filteredPackages.isEmpty {
+                        EmptyStateView(
+                            title: "No matching packages",
+                            systemImage: "line.3.horizontal.decrease.circle",
+                            message: "Try clearing your search query or switching managers."
+                        )
+                    }
+
+                case .cancelled:
+                    VStack(spacing: 12) {
+                        EmptyStateView(
+                            title: "Scan Stopped",
+                            systemImage: "xmark.circle",
+                            message: "The scan was stopped. Existing tools were kept."
+                        )
+                        Button {
+                            viewModel.scanCategory(.packages)
+                        } label: {
+                            Label("Scan Apps & Tools", systemImage: "magnifyingglass")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.teal)
                     }
                 }
-                .pickerStyle(.segmented)
             }
         }
-        .padding(12)
     }
 
-    private var maintenanceBar: some View {
-        HStack(spacing: 10) {
-            Text("Maintenance")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Button("Brew Cleanup") {
-                viewModel.requestMaintenance("brew_cleanup")
+    private var headerBanner: some View {
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Apps & Dev Tools")
+                    .font(.title2.bold())
+                Text("Extra coding tools and virtual machines installed on your Mac.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
             }
-            .buttonStyle(.bordered)
-            .disabled(viewModel.isWorking)
-            Button("Brew Autoremove") {
-                viewModel.requestMaintenance("brew_autoremove")
-            }
-            .buttonStyle(.bordered)
-            .disabled(viewModel.isWorking)
-            Button("Prune Docker") {
-                viewModel.requestMaintenance("docker_prune")
-            }
-            .buttonStyle(.bordered)
-            .tint(.orange)
-            .disabled(viewModel.isWorking)
             Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 14)
+        .padding(.bottom, 6)
+    }
+
+    private var toolbar: some View {
+        HStack(spacing: 12) {
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+                TextField("Search apps & tools…", text: $searchText)
+                    .textFieldStyle(.plain)
+                if !searchText.isEmpty {
+                    Button { searchText = "" } label: {
+                        Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(Color(NSColor.controlBackgroundColor))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.2), lineWidth: 1))
+            .frame(maxWidth: 240)
+
+            Picker("Manager", selection: $managerFilter) {
+                ForEach(PackageManagerFilter.allCases) { filter in
+                    Text(filter.rawValue).tag(filter)
+                }
+            }
+            .pickerStyle(.menu)
+            .frame(width: 170)
+
+            Menu {
+                Toggle("Explicitly Installed Only", isOn: $explicitOnly)
+                Toggle("Multi-Version / Bloat Only", isOn: $multiVersionOnly)
+                Divider()
+                Button("Clean Homebrew Cache") {
+                    viewModel.requestMaintenance("brew_cleanup")
+                }
+                .disabled(viewModel.isWorking)
+                Button("Remove Unused Homebrew Packages") {
+                    viewModel.requestMaintenance("brew_autoremove")
+                }
+                .disabled(viewModel.isWorking)
+                Button("Prune Docker VM") {
+                    viewModel.requestMaintenance("docker_prune")
+                }
+                .disabled(viewModel.isWorking)
+            } label: {
+                Label("Maintenance", systemImage: "wrench.and.screwdriver")
+            }
+            .menuStyle(.borderlessButton)
+
+            Spacer()
+
+            if viewModel.activeScanningCategory == .packages {
+                Button(role: .cancel) {
+                    viewModel.cancelScan()
+                } label: {
+                    Label("Stop", systemImage: "xmark.circle")
+                }
+                .buttonStyle(.bordered)
+                .tint(.red)
+            } else {
+                Button {
+                    viewModel.scanCategory(.packages)
+                } label: {
+                    Label(
+                        viewModel.status(for: .packages).isCompleted ? "Refresh" : "Scan",
+                        systemImage: viewModel.status(for: .packages).isCompleted ? "arrow.clockwise" : "magnifyingglass"
+                    )
+                }
+                .buttonStyle(.bordered)
+                .keyboardShortcut("r", modifiers: .command)
+                .help("Scan Apps & Dev Tools (Cmd + R)")
+            }
+
             if viewModel.isWorking {
                 ProgressView()
                     .controlSize(.small)
-                Text("Running CLI…")
+                Text("Working…")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
     }
 }
 
@@ -143,36 +240,34 @@ private struct PackageSummaryMetricStrip: View {
         viewModel.terminalPackages.reduce(0) { $0.saturatingAdding($1.physicalBytes) }
     }
 
-    private var selectedBytes: UInt64 {
-        viewModel.terminalPackages
-            .filter { viewModel.selectedIDs.contains($0.id) }
-            .reduce(0) { $0.saturatingAdding($1.physicalBytes) }
+    private var multiVersionCount: Int {
+        viewModel.terminalPackages.filter { $0.versionCount > 1 }.count
     }
 
     var body: some View {
         HStack(spacing: 10) {
-            metric("Total Found", viewModel.byteCount(totalBytes), .secondary)
-            metric("Selected to Reclaim", viewModel.byteCount(selectedBytes), .orange)
-            metric("Safe Recommended", "Review before action", .purple)
+            metric("Total Tools", "\(viewModel.terminalPackages.count)", .secondary)
+            metric("Space Occupied", viewModel.byteCount(totalBytes), .blue)
+            metric("Multi-Version Tools", "\(multiVersionCount)", multiVersionCount > 0 ? .orange : .secondary)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 9)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
         .background(.thinMaterial)
     }
 
     private func metric(_ title: String, _ value: String, _ color: Color) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: 2) {
             Text(title)
-                .font(.caption)
+                .font(.caption2)
                 .foregroundStyle(.secondary)
             Text(value)
-                .font(.system(.headline, design: .rounded))
+                .font(.system(.subheadline, design: .rounded).weight(.semibold))
                 .foregroundStyle(color)
                 .monospacedDigit()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 10)
-        .padding(.vertical, 7)
+        .padding(.vertical, 6)
         .background(color.opacity(0.08))
         .clipShape(RoundedRectangle(cornerRadius: 8))
     }
@@ -181,148 +276,180 @@ private struct PackageSummaryMetricStrip: View {
 private struct PackageRow: View {
     let package: TerminalPackage
     @EnvironmentObject private var viewModel: DiskAuditViewModel
-    @State private var showingDetails = false
+    @State private var showingInfo = false
 
-    private var isSparse: Bool {
-        package.logicalBytes > package.physicalBytes.saturatingMultiplying(2)
+    private var shortPath: String {
+        let home = viewModel.homeDirectory
+        return package.path.hasPrefix(home) ? "~" + package.path.dropFirst(home.count) : package.path
+    }
+
+    private var isContainer: Bool {
+        package.manager == "Container VM"
     }
 
     var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: package.manager == "Container VM" ? "shippingbox.fill" : "terminal.fill")
-                .foregroundStyle(package.manager == "Container VM" ? .orange : .secondary)
-                .frame(width: 24)
+        HStack(spacing: 12) {
+            // ELEMENT 1: Left (Icon + Bold Friendly Title + 1-Line Subtitle)
+            Image(systemName: isContainer ? "desktopcomputer" : "shippingbox.fill")
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(isContainer ? Color.purple : Color.blue)
+                .frame(width: 30, height: 30)
+                .background((isContainer ? Color.purple : Color.blue).opacity(0.12))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
 
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
-                    Text(package.name)
-                        .font(.headline)
-                    badge(package.manager, color: .blue)
-                    if package.manager == "Homebrew Formula" {
-                        badge(package.installedOnRequest ? "User Installed" : "Dependency", color: package.installedOnRequest ? .green : .orange)
-                    }
-                    if package.versionCount > 1 {
-                        badge("\(package.versionCount) versions", color: .orange)
-                    }
-                    badge(riskLabel, color: riskColor)
-                }
-                Text("CLI-managed tool or runtime footprint")
+            VStack(alignment: .leading, spacing: 3) {
+                Text(package.name)
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+
+                Text(subtitleText)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
-                if isSparse {
-                    Text("Sparse: \(viewModel.byteCount(package.physicalBytes)) physical / \(viewModel.byteCount(package.logicalBytes)) logical")
-                        .font(.caption2)
-                        .foregroundStyle(.orange)
-                } else {
-                    Text(package.path)
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
-
-                DisclosureGroup("Technical details", isExpanded: $showingDetails) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(package.path)
-                            .font(.caption.monospaced())
-                            .foregroundStyle(.secondary)
-                            .textSelection(.enabled)
-                        Text(package.uninstallCmd)
-                            .font(.caption.monospaced())
-                            .foregroundStyle(.secondary)
-                            .textSelection(.enabled)
-                    }
-                    .padding(.top, 3)
-                }
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
+                    .truncationMode(.middle)
             }
 
-            Spacer(minLength: 12)
+            Spacer(minLength: 16)
 
-            VStack(alignment: .trailing, spacing: 3) {
+            // ELEMENT 2: Middle/Right (ONE Semantic Safety Pill)
+            Text(isContainer ? "Keep Safe" : "Can Be Rebuilt")
+                .font(.caption2.weight(.medium))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background((isContainer ? Color.secondary : Color.blue).opacity(0.12))
+                .foregroundStyle(isContainer ? Color.secondary : Color.blue)
+                .clipShape(Capsule())
+                .lineLimit(1)
+
+            // ELEMENT 3: Far Right (Formatted Size + ⓘ Button + Uninstall)
+            HStack(spacing: 8) {
                 Text(viewModel.byteCount(package.physicalBytes))
-                    .font(.system(.body, design: .monospaced))
-                    .bold()
-                Text("physical")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
+                    .font(.system(.body, design: .rounded).weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .monospacedDigit()
+                    .frame(minWidth: 70, alignment: .trailing)
 
-            Button(package.manager == "Container VM" ? "Prune via CLI" : "Uninstall") {
+                Button {
+                    showingInfo.toggle()
+                } label: {
+                    Image(systemName: "info.circle")
+                        .font(.system(size: 14))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .popover(isPresented: $showingInfo, arrowEdge: .trailing) {
+                    packageInfoPopover
+                }
+
+                Button(isContainer ? "Prune" : "Uninstall") {
+                    viewModel.requestPackageAction(package)
+                }
+                .buttonStyle(.bordered)
+                .tint(isContainer ? .orange : .red)
+                .disabled(viewModel.isWorking)
+            }
+        }
+        .padding(.vertical, 6)
+        .contextMenu {
+            Button(isContainer ? "Prune via CLI" : "Uninstall via CLI", systemImage: "terminal") {
                 viewModel.requestPackageAction(package)
             }
-            .buttonStyle(.bordered)
-            .tint(package.manager == "Container VM" ? .orange : .red)
-            .disabled(viewModel.isWorking)
-
-            Button {
-                reveal(package.path)
-            } label: {
-                Image(systemName: "folder")
+            Button("Reveal in Finder", systemImage: "folder") {
+                FinderSupport.reveal(path: package.path)
             }
-            .buttonStyle(.borderless)
-            .help("Reveal in Finder")
-
-            Menu {
-                packageActions
-            } label: {
-                Image(systemName: "ellipsis.circle")
+            Divider()
+            Button("Copy Uninstall Command", systemImage: "terminal") {
+                copy(package.uninstallCmd)
             }
-            .menuStyle(.borderlessButton)
-        }
-        .padding(.vertical, 5)
-        .contextMenu {
-            packageActions
+            Button("Copy Path", systemImage: "doc.on.doc") {
+                copy(package.path)
+            }
         }
     }
 
-    @ViewBuilder
-    private var packageActions: some View {
-        Button(package.manager == "Container VM" ? "Prune via CLI" : "Uninstall via CLI", systemImage: "terminal") {
-            viewModel.requestPackageAction(package)
+    private var subtitleText: String {
+        if viewModel.showProDetails {
+            return "\(shortPath) · \(package.uninstallCmd)"
         }
-        Button("Reveal in Finder", systemImage: "folder") {
-            reveal(package.path)
+        if isContainer {
+            return "Docker virtual disk · Manage with Docker Prune"
         }
-        Button("Copy CLI Command", systemImage: "doc.on.doc") {
-            copy(package.uninstallCmd)
+        if package.versionCount > 1 {
+            return "\(package.manager) · \(package.versionCount) versions installed"
         }
-        Button("Copy Path", systemImage: "link") {
-            copy(package.path)
-        }
+        return "\(package.manager) · Installed developer tool"
     }
 
-    private func badge(_ title: String, color: Color) -> some View {
-        Text(title)
-            .font(.caption2)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 3)
-            .background(color.opacity(0.14))
-            .foregroundStyle(color)
-            .clipShape(Capsule())
-            .lineLimit(1)
-    }
+    private var packageInfoPopover: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 10) {
+                Image(systemName: isContainer ? "desktopcomputer" : "shippingbox.fill")
+                    .font(.title2)
+                    .foregroundStyle(isContainer ? Color.purple : Color.blue)
 
-    private var riskLabel: String {
-        switch package.risk {
-        case .safe: return "Safe"
-        case .rebuildable: return "Rebuildable"
-        case .highRiskCli: return "High-Risk CLI / Protected"
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(package.name)
+                        .font(.headline)
+                        .lineLimit(1)
+                    Text("\(package.manager) · \(package.installedOnRequest ? "User Installed" : "Dependency")")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 8) {
+                infoRow(label: "Safety Status", value: isContainer ? "Protected Container Disk (Use Docker Prune)" : "Can Be Rebuilt (Reinstallable via CLI)")
+                infoRow(label: "Physical APFS Size", value: viewModel.byteCount(package.physicalBytes))
+                if package.logicalBytes != package.physicalBytes {
+                    infoRow(label: "Logical Size", value: viewModel.byteCount(package.logicalBytes))
+                }
+                if package.versionCount > 1 {
+                    infoRow(label: "Versions Installed", value: "\(package.versionCount) versions")
+                }
+                infoRow(label: "CLI Command", value: package.uninstallCmd)
+                infoRow(label: "Location", value: shortPath)
+            }
+
+            Divider()
+
+            HStack(spacing: 10) {
+                Button("Show in Finder", systemImage: "folder") {
+                    FinderSupport.reveal(path: package.path)
+                    showingInfo = false
+                }
+                .buttonStyle(.bordered)
+
+                Button("Copy Command", systemImage: "terminal") {
+                    copy(package.uninstallCmd)
+                }
+                .buttonStyle(.bordered)
+
+                Spacer()
+
+                Button("Done") {
+                    showingInfo = false
+                }
+                .buttonStyle(.borderedProminent)
+            }
         }
+        .padding(16)
+        .frame(width: 440)
     }
 
-    private var riskColor: Color {
-        switch package.risk {
-        case .safe: return .green
-        case .rebuildable: return .orange
-        case .highRiskCli: return .red
+    private func infoRow(label: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.callout)
+                .textSelection(.enabled)
         }
-    }
-
-    private func reveal(_ path: String) {
-        FinderSupport.reveal(path: path)
     }
 
     private func copy(_ value: String) {
@@ -334,9 +461,5 @@ private struct PackageRow: View {
 private extension UInt64 {
     func saturatingAdding(_ other: UInt64) -> UInt64 {
         addingReportingOverflow(other).partialValue
-    }
-
-    func saturatingMultiplying(_ other: UInt64) -> UInt64 {
-        multipliedReportingOverflow(by: other).partialValue
     }
 }

@@ -113,6 +113,25 @@ pub struct DuplicateGroup {
     pub members: Vec<DuplicateMember>,
 }
 
+#[derive(uniffi::Record, Debug, Clone)]
+pub struct FullAuditOptions {
+    pub root_path: String,
+    pub stale_threshold_days: u64,
+    pub large_file_threshold_bytes: u64,
+    pub include_dev_caches_in_large_files: bool,
+    pub duplicate_min_size_bytes: u64,
+}
+
+#[derive(uniffi::Record, Debug, Clone)]
+pub struct FullAuditReport {
+    pub safe_caches: Vec<ScannedItem>,
+    pub project_artifacts: Vec<ScannedItem>,
+    pub terminal_packages: Vec<TerminalPackage>,
+    pub large_files: Vec<ScannedItem>,
+    pub duplicate_groups: Vec<DuplicateGroup>,
+    pub disk_overview: DiskOverview,
+}
+
 #[derive(uniffi::Error, Debug, Error)]
 pub enum RustDiskError {
     #[error("{message}")]

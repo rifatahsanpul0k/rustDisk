@@ -4,10 +4,26 @@ struct StorageHeaderView: View {
     @EnvironmentObject private var viewModel: DiskAuditViewModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline) {
-                Label("APFS Storage", systemImage: "internaldrive.fill")
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .center) {
+                Label("Mac Storage", systemImage: "internaldrive.fill")
                     .font(.headline)
+
+                if let thermalLabel = viewModel.thermalStateLabel {
+                    HStack(spacing: 5) {
+                        Image(systemName: "thermometer.medium")
+                            .foregroundStyle(.teal)
+                        Text(thermalLabel)
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(.primary)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Color.teal.opacity(0.12))
+                    .clipShape(Capsule())
+                    .overlay(Capsule().stroke(Color.teal.opacity(0.25), lineWidth: 1))
+                    .help("Easing processor load to keep your Mac cool and silent.")
+                }
 
                 Spacer()
 
@@ -32,15 +48,15 @@ struct StorageHeaderView: View {
                 let selectedWidth = geometry.size.width * CGFloat(selected) / CGFloat(total)
                 let freeWidth = geometry.size.width * CGFloat(free) / CGFloat(total)
 
-                HStack(spacing: 1) {
+                HStack(spacing: 2) {
                     Rectangle()
-                        .fill(Color.blue.opacity(0.72))
+                        .fill(Color.blue.opacity(0.85))
                         .frame(width: max(remainingWidth, 0))
                     Rectangle()
-                        .fill(Color.green.opacity(0.95))
+                        .fill(Color.green)
                         .frame(width: max(selectedWidth, 0))
                     Rectangle()
-                        .fill(Color.secondary.opacity(0.22))
+                        .fill(Color.secondary.opacity(0.20))
                         .frame(width: max(freeWidth, 0))
                 }
                 .clipShape(Capsule())
@@ -49,20 +65,25 @@ struct StorageHeaderView: View {
             .frame(height: 12)
 
             HStack(spacing: 16) {
-                legend(color: .blue, title: "Used after selection", value: viewModel.byteCount((viewModel.diskOverview?.usedBytes ?? 0).saturatingSubtracting(viewModel.selectedPhysicalBytes)))
-                legend(color: .green, title: "Selected to reclaim", value: viewModel.selectedPhysicalGB)
+                legend(color: .blue, title: "Used", value: viewModel.byteCount((viewModel.diskOverview?.usedBytes ?? 0).saturatingSubtracting(viewModel.selectedPhysicalBytes)))
+                legend(color: .green, title: "Selected to Clean", value: viewModel.selectedPhysicalGB)
+                legend(color: .secondary.opacity(0.5), title: "Free Now", value: viewModel.byteCount(viewModel.diskOverview?.availableBytes ?? 0))
+
                 Spacer()
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text("Free now \(viewModel.byteCount(viewModel.diskOverview?.availableBytes ?? 0))")
-                    Text("Free after cleanup: \(viewModel.byteCount(viewModel.projectedAvailableBytes))")
+
+                HStack(spacing: 4) {
+                    Text("Free After Cleaning:")
+                        .foregroundStyle(.secondary)
+                    Text(viewModel.byteCount(viewModel.projectedAvailableBytes))
+                        .fontWeight(.semibold)
                         .foregroundStyle(.green)
                 }
                 .font(.caption)
                 .monospacedDigit()
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
         .background(.thinMaterial)
     }
 
@@ -70,10 +91,11 @@ struct StorageHeaderView: View {
         HStack(spacing: 5) {
             Circle()
                 .fill(color)
-                .frame(width: 7, height: 7)
-            Text("\(title) \(value)")
+                .frame(width: 8, height: 8)
+            Text("\(title): \(value)")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                .monospacedDigit()
         }
     }
 }

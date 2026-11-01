@@ -2,6 +2,23 @@ import Foundation
 import AppKit
 import SwiftUI
 
+enum CategoryScanStatus: Equatable {
+    case notScanned
+    case scanning
+    case completed(itemCount: Int, totalPhysicalBytes: UInt64, timestamp: Date)
+    case cancelled
+
+    var isScanning: Bool {
+        if case .scanning = self { return true }
+        return false
+    }
+
+    var isCompleted: Bool {
+        if case .completed = self { return true }
+        return false
+    }
+}
+
 @MainActor
 final class DiskAuditViewModel: ObservableObject {
     @Published var safeCacheItems: [ScannedItem] = []
@@ -16,6 +33,14 @@ final class DiskAuditViewModel: ObservableObject {
     @Published var duplicateMinSizeBytes: UInt64 = 1 * 1024 * 1024
     @Published var hideLargeFileDevCaches = true
     @Published var staleThresholdDays: UInt64 = 30
+    @Published var categoryStatus: [NavigationTab: CategoryScanStatus] = [
+        .safeCaches: .notScanned,
+        .projects: .notScanned,
+        .largeFiles: .notScanned,
+        .duplicates: .notScanned,
+        .packages: .notScanned,
+    ]
+    @Published var activeScanningCategory: NavigationTab?
     @Published var isScanning = false
     @Published var isWorking = false
     @Published var statusBanner = "Ready to audit your Mac"
@@ -41,6 +66,12 @@ final class DiskAuditViewModel: ObservableObject {
     @Published var smartCleanIncludeTerminalPackages = false
     @Published var allowDeleteAllDuplicateCopies = false
     @Published var unlockActiveProjectSelection = false
+    @Published var thermalStateLabel: String?
+    @Published var showProDetails: Bool = UserDefaults.standard.bool(forKey: "showProDetails") {
+        didSet {
+            UserDefaults.standard.set(showProDetails, forKey: "showProDetails")
+        }
+    }
 
     let homeDirectory = FileManager.default.homeDirectoryForCurrentUser.path
     private var activeScanTask: Task<Void, Never>?
@@ -51,6 +82,38 @@ final class DiskAuditViewModel: ObservableObject {
 
     init() {
         diskOverview = getDiskOverview()
+        updateThermalState()
+        NotificationCenter.default.addObserver(
+            forName: ProcessInfo.thermalStateDidChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.updateThermalState()
+            }
+        }
+    }
+
+    func updateThermalState() {
+        let state = ProcessInfo.processInfo.thermalState
+        let level: UInt8
+        let label: String?
+        switch state {
+        case .nominal:
+            level = 0
+            label = nil
+        case .fair:
+            level = 1
+            label = "Cool & Quiet Mode"
+        case .serious, .critical:
+            level = state == .serious ? 2 : 3
+            label = "Cool & Quiet Mode"
+        @unknown default:
+            level = 0
+            label = nil
+        }
+        setThermalLevel(level: level)
+        self.thermalStateLabel = label
     }
 
     var staleProjects: [ScannedItem] {
@@ -246,101 +309,253 @@ final class DiskAuditViewModel: ObservableObject {
         cancelActiveScan()
     }
 
-    func runScan() {
-        guard !isScanning else { return }
+    func status(for category: NavigationTab) -> CategoryScanStatus {
+        categoryStatus[category] ?? .notScanned
+    }
 
+    func scanCategory(_ category: NavigationTab) {
+        guard activeScanningCategory != category else { return }
+
+        // Cancel running scan work cleanly before starting a new scan
         cancelRunningScanWork()
+        updateThermalState()
+
+        activeScanningCategory = category
+        categoryStatus[category] = .scanning
         isScanning = true
-        scanPhaseIndex = 1
         scanProgress = 0.0
-        scanDiscoveredBytes = 0
-        scanPhase = "1/5 Scanning Safe Caches…"
-        scanPhaseDetail = "Enumerating cache directories and measuring physical APFS allocation…"
+        scanPhase = "Scanning \(category.rawValue)…"
+        scanPhaseDetail = categoryScanDetail(for: category)
         statusBanner = scanPhase
+
         let home = homeDirectory
-        let threshold = largeFileThresholdBytes
-        let duplicateThreshold = duplicateMinSizeBytes
         let staleThreshold = staleThresholdDays
+        let threshold = largeFileThresholdBytes
         let includeDevCaches = !hideLargeFileDevCaches
+        let duplicateThreshold = duplicateMinSizeBytes
 
-        activeScanTask = Task { @MainActor [weak self] in
-            let caches = await Task.detached(priority: .utility) {
-                scanSafeCaches(homeDir: home)
-            }.value
-            guard !Task.isCancelled, let self else { return }
-            self.safeCacheItems = caches
-            self.scanDiscoveredBytes = self.physicalBytes(for: caches)
-            self.scanProgress = 0.25
-            self.scanPhaseIndex = 2
-            self.scanPhase = "2/5 Analyzing Project Activity…"
-            self.scanPhaseDetail = "Finding recognized project artifacts while preserving source files and .git directories…"
-            self.statusBanner = self.scanPhase
+        activeScanTask = Task(priority: .utility) { @MainActor [weak self] in
+            guard let self else { return }
 
-            let projects = await Task.detached(priority: .utility) {
-                scanProjectArtifacts(rootPath: home, staleThresholdDays: staleThreshold)
-            }.value
-            guard !Task.isCancelled else { return }
-            self.projectItems = projects
-            self.scanDiscoveredBytes = self.scanDiscoveredBytes.saturatingAdding(self.physicalBytes(for: projects))
-            self.scanProgress = 0.5
-            self.scanPhaseIndex = 3
-            self.scanPhase = "3/5 Inspecting Terminal Packages…"
-            self.scanPhaseDetail = "Reading package receipts, runtime versions, and CLI-managed installations…"
-            self.statusBanner = self.scanPhase
-
-            let packages = await Task.detached(priority: .utility) {
-                scanTerminalPackages(homeDir: home)
-            }.value
-            guard !Task.isCancelled else { return }
-            self.terminalPackages = packages
-            self.scanDiscoveredBytes = self.scanDiscoveredBytes.saturatingAdding(
-                packages.reduce(0) { $0.saturatingAdding($1.physicalBytes) }
-            )
-            self.scanProgress = 0.75
-            self.scanPhaseIndex = 4
-            self.scanPhase = "4/5 Hunting Large Files…"
-            self.scanPhaseDetail = "Scanning eligible files and comparing physical APFS allocation…"
-            self.statusBanner = self.scanPhase
-
-            let largeFiles = await Task.detached(priority: .utility) {
-                scanLargeFilesWithOptions(
-                    rootPath: home,
-                    thresholdBytes: threshold,
-                    includeDevCaches: includeDevCaches
+            switch category {
+            case .safeCaches:
+                let caches = await Task.detached(priority: .utility) {
+                    scanSafeCaches(homeDir: home)
+                }.value
+                guard !Task.isCancelled else { return }
+                self.safeCacheItems = caches
+                self.selectedIDs.formUnion(caches.map(\.id))
+                let bytes = self.physicalBytes(for: caches)
+                self.categoryStatus[.safeCaches] = .completed(
+                    itemCount: caches.count,
+                    totalPhysicalBytes: bytes,
+                    timestamp: Date()
                 )
-            }.value
-            guard !Task.isCancelled else { return }
-            self.largeFileItems = largeFiles
-            self.scanDiscoveredBytes = self.scanDiscoveredBytes.saturatingAdding(self.physicalBytes(for: largeFiles))
-            self.scanPhase = "5/5 Finding Duplicate Files, Folders & Packages…"
-            self.scanPhaseDetail = "Indexing candidates, fingerprinting content, and hashing exact matches…"
-            self.statusBanner = self.scanPhase
-            self.scanPhaseIndex = 5
-            self.scanProgress = 0.9
-            let duplicates = await Task.detached(priority: .utility) {
-                scanDuplicates(rootPath: home, minSizeBytes: duplicateThreshold)
-            }.value
-            guard !Task.isCancelled else { return }
-            self.duplicateGroups = duplicates
+                self.statusBanner = "Finished scanning \(category.rawValue): found \(caches.count) item(s) (\(self.byteCount(bytes)))."
+
+            case .projects:
+                let projects = await Task.detached(priority: .utility) {
+                    scanProjectArtifacts(rootPath: home, staleThresholdDays: staleThreshold)
+                }.value
+                guard !Task.isCancelled else { return }
+                self.projectItems = projects
+                self.selectedIDs.subtract(Set(projects.map(\.id)))
+                self.selectedIDs.formUnion(projects.filter { $0.activity == .stale }.map(\.id))
+                let bytes = self.physicalBytes(for: projects)
+                self.categoryStatus[.projects] = .completed(
+                    itemCount: projects.count,
+                    totalPhysicalBytes: bytes,
+                    timestamp: Date()
+                )
+                self.statusBanner = "Finished scanning \(category.rawValue): classified \(projects.count) project folder(s) (\(self.byteCount(bytes)))."
+
+            case .largeFiles:
+                let largeFiles = await Task.detached(priority: .utility) {
+                    scanLargeFilesWithOptions(
+                        rootPath: home,
+                        thresholdBytes: threshold,
+                        includeDevCaches: includeDevCaches
+                    )
+                }.value
+                guard !Task.isCancelled else { return }
+                self.largeFileItems = largeFiles
+                let installers = largeFiles.filter { $0.category == "Disk Images & Installers" && $0.risk != .highRiskCli }
+                self.selectedIDs.formUnion(installers.map(\.id))
+                let bytes = self.physicalBytes(for: largeFiles)
+                self.categoryStatus[.largeFiles] = .completed(
+                    itemCount: largeFiles.count,
+                    totalPhysicalBytes: bytes,
+                    timestamp: Date()
+                )
+                self.statusBanner = "Finished scanning \(category.rawValue): found \(largeFiles.count) file(s) (\(self.byteCount(bytes)))."
+
+            case .duplicates:
+                let duplicates = await Task.detached(priority: .utility) {
+                    scanDuplicates(rootPath: home, minSizeBytes: duplicateThreshold)
+                }.value
+                guard !Task.isCancelled else { return }
+                self.duplicateGroups = duplicates
+                self.autoSelectRedundantDuplicates()
+                let bytes = self.recommendedDuplicateBytes
+                self.categoryStatus[.duplicates] = .completed(
+                    itemCount: duplicates.count,
+                    totalPhysicalBytes: bytes,
+                    timestamp: Date()
+                )
+                self.statusBanner = "Finished scanning \(category.rawValue): found \(duplicates.count) twin group(s) (\(self.byteCount(bytes)))."
+
+            case .packages:
+                let packages = await Task.detached(priority: .utility) {
+                    scanTerminalPackages(homeDir: home)
+                }.value
+                guard !Task.isCancelled else { return }
+                self.terminalPackages = packages
+                let bytes = packages.reduce(UInt64(0)) { $0.saturatingAdding($1.physicalBytes) }
+                self.categoryStatus[.packages] = .completed(
+                    itemCount: packages.count,
+                    totalPhysicalBytes: bytes,
+                    timestamp: Date()
+                )
+                self.statusBanner = "Finished scanning \(category.rawValue): found \(packages.count) tool(s) (\(self.byteCount(bytes)))."
+
+            case .smartOverview:
+                break
+            }
+
             self.diskOverview = getDiskOverview()
-            self.selectedIDs = self.recommendedIDs
             self.scanProgress = 1.0
-            self.scanPhaseIndex = 5
             self.isScanning = false
-            self.scanPhaseDetail = "All scan stages finished."
-            self.statusBanner = "Scan complete: \(caches.count) caches, \(projects.count) project artifacts, \(packages.count) packages, \(largeFiles.count) large files, \(duplicates.count) duplicate groups."
+            self.activeScanningCategory = nil
             self.activeScanTask = nil
+        }
+    }
+
+    func scanFastJunk() {
+        guard activeScanningCategory == nil else { return }
+        cancelRunningScanWork()
+        updateThermalState()
+
+        isScanning = true
+        activeScanningCategory = .smartOverview
+        categoryStatus[.safeCaches] = .scanning
+        categoryStatus[.projects] = .scanning
+        scanProgress = 0.0
+        scanPhase = "Scanning Fast Junk & Caches…"
+        scanPhaseDetail = "Checking temporary caches and old project dependency folders…"
+        statusBanner = scanPhase
+
+        let home = homeDirectory
+        let staleThreshold = staleThresholdDays
+
+        activeScanTask = Task(priority: .utility) { @MainActor [weak self] in
+            guard let self else { return }
+
+            let (caches, projects) = await Task.detached(priority: .utility) {
+                let c = scanSafeCaches(homeDir: home)
+                let p = scanProjectArtifacts(rootPath: home, staleThresholdDays: staleThreshold)
+                return (c, p)
+            }.value
+
+            guard !Task.isCancelled else { return }
+
+            self.safeCacheItems = caches
+            self.selectedIDs.formUnion(caches.map(\.id))
+            let cacheBytes = self.physicalBytes(for: caches)
+            self.categoryStatus[.safeCaches] = .completed(
+                itemCount: caches.count,
+                totalPhysicalBytes: cacheBytes,
+                timestamp: Date()
+            )
+
+            self.projectItems = projects
+            self.selectedIDs.subtract(Set(projects.map(\.id)))
+            self.selectedIDs.formUnion(projects.filter { $0.activity == .stale }.map(\.id))
+            let projectBytes = self.physicalBytes(for: projects)
+            self.categoryStatus[.projects] = .completed(
+                itemCount: projects.count,
+                totalPhysicalBytes: projectBytes,
+                timestamp: Date()
+            )
+
+            self.diskOverview = getDiskOverview()
+            self.scanProgress = 1.0
+            self.isScanning = false
+            self.activeScanningCategory = nil
+            self.activeScanTask = nil
+            self.statusBanner = "Fast scan complete: found \(self.byteCount(cacheBytes.saturatingAdding(projectBytes))) in safe caches and old projects."
+        }
+    }
+
+    func scanCurrentTab() {
+        if selectedTab == .smartOverview {
+            scanFastJunk()
+        } else {
+            scanCategory(selectedTab)
+        }
+    }
+
+    func runScan() {
+        scanCurrentTab()
+    }
+
+    func rescanLargeFiles() {
+        scanCategory(.largeFiles)
+    }
+
+    func rescanProjects() {
+        scanCategory(.projects)
+    }
+
+    func rescanDuplicates() {
+        scanCategory(.duplicates)
+    }
+
+    private func categoryScanDetail(for category: NavigationTab) -> String {
+        switch category {
+        case .safeCaches:
+            return "Checking ~/Library/Caches, browser caches, and package manager temp files…"
+        case .projects:
+            return "Inspecting manifest-backed node_modules, target, and build folders…"
+        case .largeFiles:
+            return "Finding files larger than \(byteCount(largeFileThresholdBytes)) across your home directory…"
+        case .duplicates:
+            return "Fingerprinting files and finding identical copies with BLAKE3…"
+        case .packages:
+            return "Checking Homebrew, Python, Node, Rust, and Docker virtual disk footprints…"
+        case .smartOverview:
+            return "Quick scan across safe caches and project artifacts…"
         }
     }
 
     func cancelScan() {
         guard isScanning else { return }
+        if let category = activeScanningCategory {
+            if category == .smartOverview {
+                if categoryStatus[.safeCaches] == .scanning { categoryStatus[.safeCaches] = .cancelled }
+                if categoryStatus[.projects] == .scanning { categoryStatus[.projects] = .cancelled }
+            } else {
+                categoryStatus[category] = .cancelled
+            }
+        }
         cancelRunningScanWork()
         activeScanTask = nil
+        activeScanningCategory = nil
         isScanning = false
-        scanPhase = "Scan cancelled"
+        scanPhase = "Scan stopped"
         scanPhaseDetail = "Existing results were kept."
-        statusBanner = "Scan cancelled. Existing results are still available."
+        statusBanner = "Scan stopped. Your Mac was not modified."
+    }
+
+    func quickCleanSafeJunk() {
+        guard !isWorking, !isScanning else { return }
+        deletionMode = .moveToTrash
+        selectedIDs = recommendedIDs
+        normalizeDuplicateSelections()
+        guard selectedItemCount > 0 else {
+            statusBanner = "No safe junk items found to clean."
+            return
+        }
+        executeSelectedCleanup()
     }
 
     func resetToRecommended() {
@@ -351,107 +566,6 @@ final class DiskAuditViewModel: ObservableObject {
     func selectRecommendedForReview() {
         selectedIDs = recommendedIDs
         statusBanner = "Recommended items are selected for review. Nothing has been removed."
-    }
-
-    func rescanLargeFiles() {
-        guard !isScanning else { return }
-
-        cancelRunningScanWork()
-        isScanning = true
-        scanPhaseIndex = 4
-        scanProgress = 0.75
-        scanPhase = "4/5 Hunting Large Files…"
-        scanPhaseDetail = "Scanning eligible files and comparing physical APFS allocation…"
-        statusBanner = scanPhase
-        let home = homeDirectory
-        let threshold = largeFileThresholdBytes
-        let includeDevCaches = !hideLargeFileDevCaches
-        let previousLargeFileIDs = Set(largeFileItems.map(\.id))
-        let previouslySelectedLargeFileIDs = selectedIDs.intersection(previousLargeFileIDs)
-
-        activeScanTask = Task { @MainActor [weak self] in
-            let largeFiles = await Task.detached(priority: .utility) {
-                scanLargeFilesWithOptions(
-                    rootPath: home,
-                    thresholdBytes: threshold,
-                    includeDevCaches: includeDevCaches
-                )
-            }.value
-            guard !Task.isCancelled, let self else { return }
-            self.largeFileItems = largeFiles
-            self.selectedIDs.subtract(previousLargeFileIDs)
-            self.selectedIDs.formUnion(
-                previouslySelectedLargeFileIDs.intersection(Set(largeFiles.map(\.id)))
-            )
-            self.scanDiscoveredBytes = self.physicalBytes(for: largeFiles)
-            self.scanProgress = 1.0
-            self.isScanning = false
-            self.scanPhaseDetail = "Large-file scan finished."
-            self.statusBanner = "Large-file scan complete: \(largeFiles.count) files found."
-            self.activeScanTask = nil
-        }
-    }
-
-    func rescanProjects() {
-        guard !isScanning else { return }
-
-        cancelRunningScanWork()
-        isScanning = true
-        scanPhaseIndex = 2
-        scanProgress = 0.25
-        scanPhase = "2/5 Analyzing Project Activity…"
-        scanPhaseDetail = "Finding recognized project artifacts while preserving source files and .git directories…"
-        statusBanner = scanPhase
-        let home = homeDirectory
-        let staleThreshold = staleThresholdDays
-
-        activeScanTask = Task { @MainActor [weak self] in
-            let projects = await Task.detached(priority: .utility) {
-                scanProjectArtifacts(rootPath: home, staleThresholdDays: staleThreshold)
-            }.value
-            guard !Task.isCancelled, let self else { return }
-            let oldProjectIDs = Set(self.projectItems.map(\.id))
-            self.projectItems = projects
-            self.selectedIDs.subtract(oldProjectIDs)
-            self.selectedIDs.formUnion(projects.filter { $0.activity == .stale }.map(\.id))
-            self.scanDiscoveredBytes = self.physicalBytes(for: projects)
-            self.scanProgress = 1.0
-            self.isScanning = false
-            self.scanPhaseDetail = "Project activity scan finished."
-            self.statusBanner = "Project activity refreshed: \(projects.count) artifact(s) classified."
-            self.activeScanTask = nil
-        }
-    }
-
-    func rescanDuplicates() {
-        guard !isScanning else { return }
-        cancelRunningScanWork()
-        isScanning = true
-        scanPhaseIndex = 5
-        scanProgress = 0.9
-        scanPhase = "5/5 Finding Duplicate Files, Folders & Packages…"
-        scanPhaseDetail = "Indexing candidates, fingerprinting content, and hashing exact matches…"
-        statusBanner = scanPhase
-        let home = homeDirectory
-        let threshold = duplicateMinSizeBytes
-        let previousIDs = Set(duplicateGroups.flatMap { $0.members.map(\.id) })
-        let selectedDuplicateIDs = selectedIDs.intersection(previousIDs)
-
-        activeScanTask = Task { @MainActor [weak self] in
-            let duplicates = await Task.detached(priority: .utility) {
-                scanDuplicates(rootPath: home, minSizeBytes: threshold)
-            }.value
-            guard !Task.isCancelled, let self else { return }
-            self.duplicateGroups = duplicates
-            let newIDs = Set(duplicates.flatMap { $0.members.map(\.id) })
-            self.selectedIDs.subtract(previousIDs)
-            self.selectedIDs.formUnion(selectedDuplicateIDs.intersection(newIDs))
-            self.scanProgress = 1.0
-            self.isScanning = false
-            self.scanPhaseDetail = "Duplicate scan finished."
-            self.statusBanner = "Duplicate scan complete: \(duplicates.count) group(s) found."
-            self.activeScanTask = nil
-        }
     }
 
     func autoSelectRedundantDuplicates() {
@@ -681,10 +795,10 @@ final class DiskAuditViewModel: ObservableObject {
     private func recoveryMessage(skippedCount: UInt32, errorCount: Int) -> String {
         var parts: [String] = []
         if skippedCount > 0 {
-            parts.append("\(skippedCount) item(s) are currently in use or require Full Disk Access.")
+            parts.append("\(skippedCount) item(s) were skipped because an app is currently using them or macOS permission is needed.")
         }
         if errorCount > 0 {
-            parts.append("\(errorCount) item(s) returned an error and were left untouched.")
+            parts.append("\(errorCount) item(s) could not be cleaned and were left untouched for safety.")
         }
         return parts.joined(separator: " ")
     }
@@ -727,9 +841,7 @@ final class DiskAuditViewModel: ObservableObject {
                     self.isWorking = false
                     self.statusBanner = self.packageActionStatus(report)
                     if !report.success || !report.stderr.isEmpty {
-                        self.diagnosticMessage = report.stderr.isEmpty
-                            ? "The CLI action did not complete successfully. Review the command output before trying again."
-                            : report.stderr
+                        self.diagnosticMessage = "The package action could not be completed. The item might be busy, in use by another program, or require Full Disk Access."
                         self.diagnosticSkippedPaths = [packagePath]
                         self.showingDiagnosticDetails = true
                     }
@@ -738,8 +850,8 @@ final class DiskAuditViewModel: ObservableObject {
                 DispatchQueue.main.async {
                     guard let self else { return }
                     self.isWorking = false
-                    self.statusBanner = "CLI action failed: \(error.localizedDescription)"
-                    self.diagnosticMessage = "The command could not be completed. Check that the tool is installed, Full Disk Access is available, and the package is not in use."
+                    self.statusBanner = "Action could not finish. Your files were not touched."
+                    self.diagnosticMessage = "The command could not be completed. Check that the tool is installed, not in use by another program, and Full Disk Access is enabled."
                     self.diagnosticSkippedPaths = [packagePath]
                     self.showingDiagnosticDetails = true
                 }

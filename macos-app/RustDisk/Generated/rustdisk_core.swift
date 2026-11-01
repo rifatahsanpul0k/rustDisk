@@ -398,6 +398,22 @@ private class UniffiHandleMap<T> {
 #if swift(>=5.8)
     @_documentation(visibility: private)
 #endif
+private struct FfiConverterUInt8: FfiConverterPrimitive {
+    typealias FfiType = UInt8
+    typealias SwiftType = UInt8
+
+    static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> UInt8 {
+        return try lift(readInt(&buf))
+    }
+
+    static func write(_ value: UInt8, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
 private struct FfiConverterUInt32: FfiConverterPrimitive {
     typealias FfiType = UInt32
     typealias SwiftType = UInt32
@@ -887,6 +903,184 @@ public func FfiConverterTypeDuplicateMember_lift(_ buf: RustBuffer) throws -> Du
 #endif
 public func FfiConverterTypeDuplicateMember_lower(_ value: DuplicateMember) -> RustBuffer {
     return FfiConverterTypeDuplicateMember.lower(value)
+}
+
+public struct FullAuditOptions {
+    public var rootPath: String
+    public var staleThresholdDays: UInt64
+    public var largeFileThresholdBytes: UInt64
+    public var includeDevCachesInLargeFiles: Bool
+    public var duplicateMinSizeBytes: UInt64
+
+    /// Default memberwise initializers are never public by default, so we
+    /// declare one manually.
+    public init(rootPath: String, staleThresholdDays: UInt64, largeFileThresholdBytes: UInt64, includeDevCachesInLargeFiles: Bool, duplicateMinSizeBytes: UInt64) {
+        self.rootPath = rootPath
+        self.staleThresholdDays = staleThresholdDays
+        self.largeFileThresholdBytes = largeFileThresholdBytes
+        self.includeDevCachesInLargeFiles = includeDevCachesInLargeFiles
+        self.duplicateMinSizeBytes = duplicateMinSizeBytes
+    }
+}
+
+extension FullAuditOptions: Equatable, Hashable {
+    public static func == (lhs: FullAuditOptions, rhs: FullAuditOptions) -> Bool {
+        if lhs.rootPath != rhs.rootPath {
+            return false
+        }
+        if lhs.staleThresholdDays != rhs.staleThresholdDays {
+            return false
+        }
+        if lhs.largeFileThresholdBytes != rhs.largeFileThresholdBytes {
+            return false
+        }
+        if lhs.includeDevCachesInLargeFiles != rhs.includeDevCachesInLargeFiles {
+            return false
+        }
+        if lhs.duplicateMinSizeBytes != rhs.duplicateMinSizeBytes {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(rootPath)
+        hasher.combine(staleThresholdDays)
+        hasher.combine(largeFileThresholdBytes)
+        hasher.combine(includeDevCachesInLargeFiles)
+        hasher.combine(duplicateMinSizeBytes)
+    }
+}
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeFullAuditOptions: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FullAuditOptions {
+        return
+            try FullAuditOptions(
+                rootPath: FfiConverterString.read(from: &buf),
+                staleThresholdDays: FfiConverterUInt64.read(from: &buf),
+                largeFileThresholdBytes: FfiConverterUInt64.read(from: &buf),
+                includeDevCachesInLargeFiles: FfiConverterBool.read(from: &buf),
+                duplicateMinSizeBytes: FfiConverterUInt64.read(from: &buf)
+            )
+    }
+
+    public static func write(_ value: FullAuditOptions, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.rootPath, into: &buf)
+        FfiConverterUInt64.write(value.staleThresholdDays, into: &buf)
+        FfiConverterUInt64.write(value.largeFileThresholdBytes, into: &buf)
+        FfiConverterBool.write(value.includeDevCachesInLargeFiles, into: &buf)
+        FfiConverterUInt64.write(value.duplicateMinSizeBytes, into: &buf)
+    }
+}
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFullAuditOptions_lift(_ buf: RustBuffer) throws -> FullAuditOptions {
+    return try FfiConverterTypeFullAuditOptions.lift(buf)
+}
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFullAuditOptions_lower(_ value: FullAuditOptions) -> RustBuffer {
+    return FfiConverterTypeFullAuditOptions.lower(value)
+}
+
+public struct FullAuditReport {
+    public var safeCaches: [ScannedItem]
+    public var projectArtifacts: [ScannedItem]
+    public var terminalPackages: [TerminalPackage]
+    public var largeFiles: [ScannedItem]
+    public var duplicateGroups: [DuplicateGroup]
+    public var diskOverview: DiskOverview
+
+    /// Default memberwise initializers are never public by default, so we
+    /// declare one manually.
+    public init(safeCaches: [ScannedItem], projectArtifacts: [ScannedItem], terminalPackages: [TerminalPackage], largeFiles: [ScannedItem], duplicateGroups: [DuplicateGroup], diskOverview: DiskOverview) {
+        self.safeCaches = safeCaches
+        self.projectArtifacts = projectArtifacts
+        self.terminalPackages = terminalPackages
+        self.largeFiles = largeFiles
+        self.duplicateGroups = duplicateGroups
+        self.diskOverview = diskOverview
+    }
+}
+
+extension FullAuditReport: Equatable, Hashable {
+    public static func == (lhs: FullAuditReport, rhs: FullAuditReport) -> Bool {
+        if lhs.safeCaches != rhs.safeCaches {
+            return false
+        }
+        if lhs.projectArtifacts != rhs.projectArtifacts {
+            return false
+        }
+        if lhs.terminalPackages != rhs.terminalPackages {
+            return false
+        }
+        if lhs.largeFiles != rhs.largeFiles {
+            return false
+        }
+        if lhs.duplicateGroups != rhs.duplicateGroups {
+            return false
+        }
+        if lhs.diskOverview != rhs.diskOverview {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(safeCaches)
+        hasher.combine(projectArtifacts)
+        hasher.combine(terminalPackages)
+        hasher.combine(largeFiles)
+        hasher.combine(duplicateGroups)
+        hasher.combine(diskOverview)
+    }
+}
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeFullAuditReport: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FullAuditReport {
+        return
+            try FullAuditReport(
+                safeCaches: FfiConverterSequenceTypeScannedItem.read(from: &buf),
+                projectArtifacts: FfiConverterSequenceTypeScannedItem.read(from: &buf),
+                terminalPackages: FfiConverterSequenceTypeTerminalPackage.read(from: &buf),
+                largeFiles: FfiConverterSequenceTypeScannedItem.read(from: &buf),
+                duplicateGroups: FfiConverterSequenceTypeDuplicateGroup.read(from: &buf),
+                diskOverview: FfiConverterTypeDiskOverview.read(from: &buf)
+            )
+    }
+
+    public static func write(_ value: FullAuditReport, into buf: inout [UInt8]) {
+        FfiConverterSequenceTypeScannedItem.write(value.safeCaches, into: &buf)
+        FfiConverterSequenceTypeScannedItem.write(value.projectArtifacts, into: &buf)
+        FfiConverterSequenceTypeTerminalPackage.write(value.terminalPackages, into: &buf)
+        FfiConverterSequenceTypeScannedItem.write(value.largeFiles, into: &buf)
+        FfiConverterSequenceTypeDuplicateGroup.write(value.duplicateGroups, into: &buf)
+        FfiConverterTypeDiskOverview.write(value.diskOverview, into: &buf)
+    }
+}
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFullAuditReport_lift(_ buf: RustBuffer) throws -> FullAuditReport {
+    return try FfiConverterTypeFullAuditReport.lift(buf)
+}
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFullAuditReport_lower(_ value: FullAuditReport) -> RustBuffer {
+    return FfiConverterTypeFullAuditReport.lower(value)
 }
 
 public struct PackageActionReport {
@@ -1671,6 +1865,12 @@ public func getDiskOverview() -> DiskOverview {
     })
 }
 
+public func getThermalLevel() -> UInt8 {
+    return try! FfiConverterUInt8.lift(try! rustCall {
+        uniffi_rustdisk_core_fn_func_get_thermal_level($0)
+    })
+}
+
 /**
  * Deletes as many requested items as possible and reports locked paths instead of aborting.
  *
@@ -1710,6 +1910,17 @@ public func scanDuplicates(rootPath: String, minSizeBytes: UInt64) -> [Duplicate
         uniffi_rustdisk_core_fn_func_scan_duplicates(
             FfiConverterString.lower(rootPath),
             FfiConverterUInt64.lower(minSizeBytes), $0
+        )
+    })
+}
+
+/**
+ * Executes a single-pass full audit over the specified root directory.
+ */
+public func scanFullAudit(options: FullAuditOptions) -> FullAuditReport {
+    return try! FfiConverterTypeFullAuditReport.lift(try! rustCall {
+        uniffi_rustdisk_core_fn_func_scan_full_audit(
+            FfiConverterTypeFullAuditOptions.lower(options), $0
         )
     })
 }
@@ -1773,6 +1984,14 @@ public func scanTerminalPackages(homeDir: String) -> [TerminalPackage] {
     })
 }
 
+public func setThermalLevel(level: UInt8) {
+    try! rustCall {
+        uniffi_rustdisk_core_fn_func_set_thermal_level(
+            FfiConverterUInt8.lower(level), $0
+        )
+    }
+}
+
 private enum InitializationResult {
     case ok
     case contractVersionMismatch
@@ -1798,6 +2017,9 @@ private var initializationResult: InitializationResult = {
     if uniffi_rustdisk_core_checksum_func_get_disk_overview() != 52986 {
         return InitializationResult.apiChecksumMismatch
     }
+    if uniffi_rustdisk_core_checksum_func_get_thermal_level() != 31954 {
+        return InitializationResult.apiChecksumMismatch
+    }
     if uniffi_rustdisk_core_checksum_func_purge_items() != 37077 {
         return InitializationResult.apiChecksumMismatch
     }
@@ -1808,6 +2030,9 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if uniffi_rustdisk_core_checksum_func_scan_duplicates() != 42897 {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if uniffi_rustdisk_core_checksum_func_scan_full_audit() != 37469 {
         return InitializationResult.apiChecksumMismatch
     }
     if uniffi_rustdisk_core_checksum_func_scan_large_files() != 8510 {
@@ -1823,6 +2048,9 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if uniffi_rustdisk_core_checksum_func_scan_terminal_packages() != 4589 {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if uniffi_rustdisk_core_checksum_func_set_thermal_level() != 15291 {
         return InitializationResult.apiChecksumMismatch
     }
 

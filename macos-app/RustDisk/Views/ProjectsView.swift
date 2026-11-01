@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 enum ProjectEcosystemFilter: String, CaseIterable, Identifiable {
-    case all = "All"
+    case all = "All Ecosystems"
     case webAndNode = "Web & Node"
     case pythonAndML = "Python & ML"
     case jvmAndBuild = "JVM & Build"
@@ -49,7 +49,8 @@ struct ProjectsView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            filtersToolbar
+            headerBanner
+            toolbar
             SummaryMetricStrip(
                 items: viewModel.projectItems,
                 recommendedItems: viewModel.recommendedStaleProjectItems
@@ -57,51 +58,118 @@ struct ProjectsView: View {
             Divider()
 
             List(selection: $viewModel.selectedIDs) {
-                DisclosureGroup(isExpanded: $staleExpanded) {
-                    ForEach(visibleStale, id: \.id) { item in
-                        ProjectArtifactRow(item: item)
-                            .tag(item.id)
-                    }
-                } label: {
-                    sectionHeader(
-                        title: "Stale Projects — Untouched >= \(viewModel.staleThresholdDays) Days (Recommended)",
-                        items: visibleStale,
-                        tint: .orange
-                    )
-                }
-
-                DisclosureGroup(isExpanded: $activeExpanded) {
-                    ForEach(visibleActive, id: \.id) { item in
-                        if viewModel.unlockActiveProjectSelection {
+                Section {
+                    DisclosureGroup(isExpanded: $staleExpanded) {
+                        ForEach(visibleStale, id: \.id) { item in
                             ProjectArtifactRow(item: item)
                                 .tag(item.id)
-                        } else {
-                            ProjectArtifactRow(item: item)
-                                .opacity(0.68)
                         }
+                    } label: {
+                        sectionHeader(
+                            title: "Old Projects — Untouched >= \(viewModel.staleThresholdDays) Days (Safe to Clean)",
+                            items: visibleStale,
+                            tint: .orange
+                        )
                     }
-                } label: {
-                    sectionHeader(
-                        title: "Active Projects — Modified < \(viewModel.staleThresholdDays) Days",
-                        items: visibleActive,
-                        tint: .green
-                    )
+                }
+
+                Section {
+                    DisclosureGroup(isExpanded: $activeExpanded) {
+                        ForEach(visibleActive, id: \.id) { item in
+                            if viewModel.unlockActiveProjectSelection {
+                                ProjectArtifactRow(item: item)
+                                    .tag(item.id)
+                            } else {
+                                ProjectArtifactRow(item: item)
+                                    .opacity(0.65)
+                            }
+                        }
+                    } label: {
+                        sectionHeader(
+                            title: "Active Projects — Modified Recently (Locked for Safety)",
+                            items: visibleActive,
+                            tint: .blue
+                        )
+                    }
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .listStyle(.inset(alternatesRowBackgrounds: true))
             .overlay {
-                if viewModel.projectItems.isEmpty {
-                    EmptyStateView(
-                        title: "No project artifacts found",
-                        systemImage: "hammer",
-                        message: "RustDisk looks for manifest-backed dependencies and build folders across your developer projects."
-                    )
-                } else if filteredItems.isEmpty {
-                    EmptyStateView(
-                        title: "No matching projects",
-                        systemImage: "line.3.horizontal.decrease.circle",
-                        message: "Try a different project name, artifact folder, path, or ecosystem."
-                    )
+                switch viewModel.status(for: .projects) {
+                case .notScanned:
+                    VStack(spacing: 14) {
+                        EmptyStateView(
+                            title: "Coding Projects Not Scanned Yet",
+                            systemImage: "hammer.fill",
+                            message: "Scan your Mac to find old dependency folders (node_modules, target, .venv) from projects you haven't opened lately."
+                        )
+                        Button {
+                            viewModel.scanCategory(.projects)
+                        } label: {
+                            Label("Scan Old Coding Folders", systemImage: "magnifyingglass")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.orange)
+                        .controlSize(.large)
+                        .disabled(viewModel.isWorking)
+                    }
+
+                case .scanning:
+                    VStack(spacing: 12) {
+                        ProgressView()
+                            .controlSize(.regular)
+                        Text("Analyzing Coding Projects…")
+                            .font(.headline)
+                        Text("Checking project manifests while leaving your code and Git history 100% untouched.")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                        Button(role: .cancel) {
+                            viewModel.cancelScan()
+                        } label: {
+                            Label("Stop Scan", systemImage: "xmark.circle")
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(.red)
+                    }
+
+                case .completed:
+                    if viewModel.projectItems.isEmpty {
+                        VStack(spacing: 12) {
+                            EmptyStateView(
+                                title: "No coding projects found",
+                                systemImage: "checkmark.seal.fill",
+                                message: "No heavy build folders or unused dependencies detected in your home directory."
+                            )
+                            Button {
+                                viewModel.scanCategory(.projects)
+                            } label: {
+                                Label("Scan Again", systemImage: "arrow.clockwise")
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                    } else if filteredItems.isEmpty {
+                        EmptyStateView(
+                            title: "No matching projects",
+                            systemImage: "line.3.horizontal.decrease.circle",
+                            message: "Try clearing your search query or switching ecosystems."
+                        )
+                    }
+
+                case .cancelled:
+                    VStack(spacing: 12) {
+                        EmptyStateView(
+                            title: "Scan Stopped",
+                            systemImage: "xmark.circle",
+                            message: "The scan was stopped. Existing project results were kept."
+                        )
+                        Button {
+                            viewModel.scanCategory(.projects)
+                        } label: {
+                            Label("Scan Coding Folders", systemImage: "magnifyingglass")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.orange)
+                    }
                 }
             }
         }
@@ -110,73 +178,103 @@ struct ProjectsView: View {
         }
     }
 
-    private var filtersToolbar: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            HStack(spacing: 10) {
-                Label("Project Dependencies", systemImage: "hammer.fill")
-                    .font(.headline)
-                Spacer(minLength: 8)
-                TextField("Search project, artifact, or path", text: $searchText)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(minWidth: 180, idealWidth: 260, maxWidth: 310)
-            }
-
-                Text("Build folders from projects you have not coded in recently. Source code and Git history are never touched.")
-                    .font(.caption)
+    private var headerBanner: some View {
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Old Coding Folders")
+                    .font(.title2.bold())
+                Text("Heavy helper folders from old coding projects you haven't opened lately. Your actual code and Git history are never touched.")
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
-                    .lineLimit(1)
-
-            HStack(spacing: 10) {
-                Button("Select All Stale") {
-                    viewModel.selectedIDs.formUnion(visibleStale.map(\.id))
-                }
-                .buttonStyle(.bordered)
-                Button("Select All Visible") {
-                    viewModel.selectedIDs.formUnion(
-                        filteredItems
-                            .filter { $0.activity == .stale || viewModel.unlockActiveProjectSelection }
-                            .map(\.id)
-                    )
-                }
-                .buttonStyle(.bordered)
-                Button("Deselect All") {
-                    viewModel.selectedIDs.subtract(viewModel.projectItems.map(\.id))
-                }
-                .buttonStyle(.bordered)
-
-                Spacer(minLength: 8)
             }
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 14)
+        .padding(.bottom, 6)
+    }
 
-            HStack(spacing: 10) {
-                Text("Ecosystem")
-                    .font(.caption)
+    private var toolbar: some View {
+        HStack(spacing: 12) {
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass")
                     .foregroundStyle(.secondary)
-                Picker("Ecosystem", selection: $ecosystemFilter) {
-                    ForEach(ProjectEcosystemFilter.allCases) { filter in
-                        Text(filter.rawValue).tag(filter)
+                TextField("Search projects…", text: $searchText)
+                    .textFieldStyle(.plain)
+                if !searchText.isEmpty {
+                    Button { searchText = "" } label: {
+                        Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
                     }
+                    .buttonStyle(.plain)
                 }
-                .pickerStyle(.menu)
-                .frame(width: 155)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(Color(NSColor.controlBackgroundColor))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.2), lineWidth: 1))
+            .frame(maxWidth: 240)
 
-                Text("Stale after")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Picker("Stale threshold", selection: $viewModel.staleThresholdDays) {
+            Picker("Ecosystem", selection: $ecosystemFilter) {
+                ForEach(ProjectEcosystemFilter.allCases) { filter in
+                    Text(filter.rawValue).tag(filter)
+                }
+            }
+            .pickerStyle(.menu)
+            .frame(width: 170)
+
+            Menu {
+                Picker("Consider Stale After", selection: $viewModel.staleThresholdDays) {
                     ForEach(thresholds, id: \.1) { label, days in
                         Text(label).tag(days)
                     }
                 }
-                .pickerStyle(.menu)
-                .frame(width: 120)
-
-                Toggle("Unlock Active Project Selection", isOn: $viewModel.unlockActiveProjectSelection)
-                    .toggleStyle(.checkbox)
-                    .help("Active project dependencies remain locked until explicitly unlocked.")
+                Divider()
+                Toggle("Unlock Active Projects", isOn: $viewModel.unlockActiveProjectSelection)
+            } label: {
+                Label("Options", systemImage: "ellipsis.circle")
             }
+            .menuStyle(.borderlessButton)
+
+            Spacer()
+
+            if viewModel.activeScanningCategory == .projects {
+                Button(role: .cancel) {
+                    viewModel.cancelScan()
+                } label: {
+                    Label("Stop", systemImage: "xmark.circle")
+                }
+                .buttonStyle(.bordered)
+                .tint(.red)
+            } else {
+                Button {
+                    viewModel.scanCategory(.projects)
+                } label: {
+                    Label(
+                        viewModel.status(for: .projects).isCompleted ? "Refresh" : "Scan",
+                        systemImage: viewModel.status(for: .projects).isCompleted ? "arrow.clockwise" : "magnifyingglass"
+                    )
+                }
+                .buttonStyle(.bordered)
+                .keyboardShortcut("r", modifiers: .command)
+                .help("Scan Old Coding Folders (Cmd + R)")
+            }
+
+            Button("Select Old Projects") {
+                viewModel.selectedIDs.formUnion(visibleStale.map(\.id))
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(.orange)
+            .disabled(visibleStale.isEmpty)
+
+            Button("Deselect") {
+                viewModel.selectedIDs.subtract(viewModel.projectItems.map(\.id))
+            }
+            .buttonStyle(.bordered)
+            .disabled(viewModel.projectItems.isEmpty)
         }
-        .padding(12)
-        .help("Only manifest-backed project artifacts are listed. Physical size uses APFS allocated blocks.")
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
     }
 
     private func sectionHeader(title: String, items: [ScannedItem], tint: Color) -> some View {
@@ -190,120 +288,181 @@ struct ProjectsView: View {
                 .background(tint.opacity(0.15))
                 .clipShape(Capsule())
             Spacer()
-            Text(byteCount(items))
+            Text(viewModel.byteCount(items.reduce(0) { $0.saturatingAdding($1.physicalBytes) }))
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
         }
-    }
-
-    private func byteCount(_ items: [ScannedItem]) -> String {
-        viewModel.byteCount(items.reduce(0) { $0.saturatingAdding($1.physicalBytes) })
     }
 }
 
 private struct ProjectArtifactRow: View {
     let item: ScannedItem
     @EnvironmentObject private var viewModel: DiskAuditViewModel
+    @State private var showingInfo = false
+
+    private var shortPath: String {
+        let home = viewModel.homeDirectory
+        return item.path.hasPrefix(home) ? "~" + item.path.dropFirst(home.count) : item.path
+    }
+
+    private var isStale: Bool {
+        item.activity == .stale
+    }
 
     var body: some View {
-        HStack(spacing: 10) {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
-                    Text(item.name)
-                        .font(.headline)
-                        .lineLimit(1)
-                    badge(item.category, color: .orange)
-                    badge(item.ecosystem, color: .blue)
-                }
-                Text(item.activity == .stale
-                     ? "Rebuildable dependencies from an older project"
-                     : "Active project dependency folder — selection is locked by default")
+        HStack(spacing: 12) {
+            // ELEMENT 1: Left (Icon + Bold Friendly Title + 1-Line Subtitle)
+            Image(systemName: isStale ? "hammer.fill" : "lock.fill")
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(isStale ? Color.orange : Color.secondary)
+                .frame(width: 30, height: 30)
+                .background((isStale ? Color.orange : Color.secondary).opacity(0.12))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(item.name)
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+
+                Text(subtitleText)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
-                HStack(spacing: 7) {
-                    Label(item.hasGit ? "Git Tracked" : "Unversioned", systemImage: item.hasGit ? "checkmark.circle" : "exclamationmark.triangle")
-                        .font(.caption2)
-                        .foregroundStyle(item.hasGit ? .green : .orange)
-                    badge("Restore: \(item.restoreHint)", color: .purple)
-                    Text(viewModel.naturalAge(item.daysSinceModified))
-                        .font(.caption2)
+                    .truncationMode(.middle)
+            }
+
+            Spacer(minLength: 16)
+
+            // ELEMENT 2: Middle/Right (ONE Semantic Safety Pill)
+            Text(isStale ? "Can Be Rebuilt" : "Keep Safe")
+                .font(.caption2.weight(.medium))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background((isStale ? Color.orange : Color.secondary).opacity(0.12))
+                .foregroundStyle(isStale ? Color.orange : Color.secondary)
+                .clipShape(Capsule())
+                .lineLimit(1)
+
+            // ELEMENT 3: Far Right (Formatted Size + ⓘ Button)
+            HStack(spacing: 8) {
+                Text(viewModel.byteCount(item.physicalBytes))
+                    .font(.system(.body, design: .rounded).weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .monospacedDigit()
+                    .frame(minWidth: 70, alignment: .trailing)
+
+                Button {
+                    showingInfo.toggle()
+                } label: {
+                    Image(systemName: "info.circle")
+                        .font(.system(size: 14))
                         .foregroundStyle(.secondary)
                 }
-            }
-
-            Spacer(minLength: 12)
-
-            VStack(alignment: .trailing, spacing: 4) {
-                Text(viewModel.naturalAge(item.daysSinceModified))
-                    .font(.caption)
-                    .foregroundStyle(item.activity == .stale ? .orange : .green)
-                    .monospacedDigit()
-                if item.activity == .active {
-                    Text("Active")
-                        .font(.caption2)
-                        .foregroundStyle(.green)
+                .buttonStyle(.plain)
+                .popover(isPresented: $showingInfo, arrowEdge: .trailing) {
+                    projectInfoPopover
                 }
             }
-
-            Text(viewModel.byteCount(item.physicalBytes))
-                .font(.system(.body, design: .monospaced))
-                .bold()
-                .frame(width: 94, alignment: .trailing)
-
-            Button {
-                reveal(item.path)
-            } label: {
-                Image(systemName: "folder")
-            }
-            .buttonStyle(.borderless)
-            .help("Reveal artifact in Finder")
-
-            Menu {
-                projectActions
-            } label: {
-                Image(systemName: "ellipsis.circle")
-            }
-            .menuStyle(.borderlessButton)
-            .help("Project actions")
         }
-        .padding(.vertical, 5)
-        .help("Modified \(item.daysSinceModified) days ago\n\(item.path)")
+        .padding(.vertical, 6)
         .contextMenu {
-            projectActions
+            Button("Reveal Artifact in Finder", systemImage: "folder") {
+                FinderSupport.reveal(path: item.path)
+            }
+            Button("Reveal Project Root", systemImage: "folder.badge.gearshape") {
+                FinderSupport.reveal(path: item.projectRoot)
+            }
+            Divider()
+            Button("Copy Path", systemImage: "doc.on.doc") {
+                copy(item.path)
+            }
+            if !item.restoreHint.isEmpty {
+                Button("Copy Rebuild Command (\(item.restoreHint))", systemImage: "terminal") {
+                    copy(item.restoreHint)
+                }
+            }
         }
     }
 
-    @ViewBuilder
-    private var projectActions: some View {
-        Button("Reveal Artifact in Finder", systemImage: "folder") {
-            reveal(item.path)
+    private var subtitleText: String {
+        if viewModel.showProDetails {
+            return "\(shortPath) · \(item.restoreHint)"
         }
-        Button("Reveal Project Folder in Finder", systemImage: "folder.badge.gearshape") {
-            reveal(item.projectRoot)
-        }
-        Divider()
-        Button("Copy Path", systemImage: "doc.on.doc") {
-            copy(item.path)
-        }
-        Button("Copy Restore Command", systemImage: "terminal") {
-            copy(item.restoreHint)
+        if isStale {
+            return "Untouched for \(viewModel.naturalAge(item.daysSinceModified)) · Your code stays safe"
+        } else {
+            return "Active project · Selection locked for safety"
         }
     }
 
-    private func badge(_ title: String, color: Color) -> some View {
-        Text(title)
-            .font(.caption2)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 3)
-            .background(color.opacity(0.14))
-            .foregroundStyle(color)
-            .clipShape(Capsule())
-            .lineLimit(1)
+    private var projectInfoPopover: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 10) {
+                Image(systemName: "hammer.fill")
+                    .font(.title2)
+                    .foregroundStyle(isStale ? Color.orange : Color.blue)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(item.name)
+                        .font(.headline)
+                        .lineLimit(1)
+                    Text("\(item.ecosystem) · \(item.category)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 8) {
+                infoRow(label: "Safety Status", value: isStale ? "Can Be Rebuilt (Safe to delete; source code untouched)" : "Active Project (Locked for safety)")
+                infoRow(label: "Rebuild Command", value: item.restoreHint.isEmpty ? "Recreated automatically upon build" : item.restoreHint)
+                infoRow(label: "Git Version Control", value: item.hasGit ? "Tracked with Git (Safe)" : "No Git repository found")
+                infoRow(label: "Physical Space", value: viewModel.byteCount(item.physicalBytes))
+                infoRow(label: "Last Modified", value: "\(item.daysSinceModified) days ago (\(viewModel.naturalAge(item.daysSinceModified)))")
+                infoRow(label: "Location", value: shortPath)
+            }
+
+            Divider()
+
+            HStack(spacing: 10) {
+                Button("Show in Finder", systemImage: "folder") {
+                    FinderSupport.reveal(path: item.path)
+                    showingInfo = false
+                }
+                .buttonStyle(.bordered)
+
+                if !item.restoreHint.isEmpty {
+                    Button("Copy Rebuild", systemImage: "terminal") {
+                        copy(item.restoreHint)
+                    }
+                    .buttonStyle(.bordered)
+                }
+
+                Spacer()
+
+                Button("Done") {
+                    showingInfo = false
+                }
+                .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding(16)
+        .frame(width: 440)
     }
 
-    private func reveal(_ path: String) {
-        FinderSupport.reveal(path: path)
+    private func infoRow(label: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.callout)
+                .textSelection(.enabled)
+        }
     }
 
     private func copy(_ value: String) {

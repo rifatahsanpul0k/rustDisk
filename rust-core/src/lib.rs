@@ -6,6 +6,8 @@ mod packages;
 mod projects;
 mod scanner;
 mod telemetry;
+mod thermal;
+mod unified;
 
 use std::sync::Once;
 
@@ -29,11 +31,14 @@ pub use cleaner::{delete_item, purge_items};
 pub use duplicates::scan_duplicates;
 pub use models::{
     CleanupReport, DeletionMode, DiskOverview, DuplicateGroup, DuplicateKind, DuplicateMember,
-    PackageActionReport, ProjectActivity, RiskTier, RustDiskError, ScannedItem, TerminalPackage,
+    FullAuditOptions, FullAuditReport, PackageActionReport, ProjectActivity, RiskTier,
+    RustDiskError, ScannedItem, TerminalPackage,
 };
 pub use packages::{run_package_maintenance, run_terminal_uninstall, scan_terminal_packages};
 pub use projects::scan_project_artifacts;
 pub use scanner::{scan_large_files, scan_large_files_with_options, scan_safe_caches};
 pub use telemetry::get_disk_overview;
+pub use thermal::{get_thermal_level, set_thermal_level};
+pub use unified::scan_full_audit;
 
 uniffi::setup_scaffolding!();

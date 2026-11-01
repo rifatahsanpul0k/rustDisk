@@ -3,230 +3,293 @@ import SwiftUI
 struct SmartOverviewView: View {
     @EnvironmentObject private var viewModel: DiskAuditViewModel
 
+    private var hasScannedAnyCategory: Bool {
+        viewModel.categoryStatus.values.contains { $0.isCompleted }
+    }
+
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 20) {
                 heroCard
-                bentoGrid
+                sectionTitle("Category Scanners")
+                cardsGrid
             }
-            .padding(18)
+            .padding(20)
         }
     }
 
     private var heroCard: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Label("Smart Overview", systemImage: "sparkles.rectangle.stack.fill")
-                        .font(.headline)
-                    Text("Recommended Safe Reclaim")
-                        .font(.title3)
-                        .foregroundStyle(.secondary)
-                    Text(viewModel.recommendedReclaimGB)
-                        .font(.system(size: 42, weight: .bold, design: .rounded))
-                        .foregroundStyle(.green)
-                        .monospacedDigit()
-                    Text("Caches, stale project dependencies, and disk-image installers that can be removed without touching source code or Git history.")
-                        .font(.body)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                    HStack(spacing: 8) {
+                        Image(systemName: "sparkles")
+                            .foregroundStyle(.green)
+                        Text("Quick Clean")
+                            .font(.headline)
+                            .foregroundStyle(.green)
+                    }
+
+                    if hasScannedAnyCategory {
+                        Text("Ready to safely free up")
+                            .font(.title3)
+                            .foregroundStyle(.secondary)
+
+                        Text(viewModel.recommendedReclaimGB)
+                            .font(.system(size: 44, weight: .bold, design: .rounded))
+                            .foregroundStyle(.green)
+                            .monospacedDigit()
+
+                        Text("Leftover temporary app caches, old project builds, and installers you don't need anymore. Your personal photos, documents, and code are never touched.")
+                            .font(.body)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } else {
+                        Text("On-Demand Mac Storage Audit")
+                            .font(.title2.bold())
+
+                        Text("Scan only what you want, when you want. Run a fast scan across your temporary junk and old project folders in seconds without heating up your Mac.")
+                            .font(.body)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
+
                 Spacer()
-                Image(systemName: "arrow.down.circle.fill")
-                    .font(.system(size: 54))
+
+                Image(systemName: hasScannedAnyCategory ? "arrow.down.circle.fill" : "bolt.shield.fill")
+                    .font(.system(size: 56))
                     .foregroundStyle(.green.gradient)
             }
 
-            HStack(spacing: 10) {
-                Button {
-                    viewModel.selectRecommendedForReview()
-                } label: {
-                    Label("Review Recommended Items", systemImage: "checklist")
+            HStack(spacing: 12) {
+                if hasScannedAnyCategory && viewModel.recommendedReclaimBytes > 0 {
+                    Button {
+                        viewModel.quickCleanSafeJunk()
+                    } label: {
+                        Label(
+                            "Move Safe Junk to Trash (\(viewModel.recommendedReclaimGB))",
+                            systemImage: "trash.fill"
+                        )
                         .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(.green)
-                .controlSize(.large)
-                .disabled(viewModel.isWorking || viewModel.isScanning || viewModel.recommendedReclaimBytes == 0)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.green)
+                    .controlSize(.large)
+                    .disabled(viewModel.isWorking || viewModel.isScanning)
 
-                Button("Reset to Recommended") {
-                    viewModel.resetToRecommended()
+                    Button {
+                        viewModel.scanFastJunk()
+                    } label: {
+                        Label("Rescan Fast Junk", systemImage: "bolt.fill")
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
+                    .disabled(viewModel.isWorking || viewModel.isScanning)
+                } else {
+                    Button {
+                        viewModel.scanFastJunk()
+                    } label: {
+                        Label("Scan Fast Junk & Caches", systemImage: "bolt.fill")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.green)
+                    .controlSize(.large)
+                    .disabled(viewModel.isWorking || viewModel.isScanning)
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.large)
             }
         }
-        .padding(20)
+        .padding(22)
         .background(
             RoundedRectangle(cornerRadius: 16)
-                .fill(Color.green.opacity(0.09))
+                .fill(Color.green.opacity(0.08))
                 .overlay {
                     RoundedRectangle(cornerRadius: 16)
-                        .stroke(Color.green.opacity(0.25), lineWidth: 1)
+                        .stroke(Color.green.opacity(0.24), lineWidth: 1)
                 }
         )
     }
 
-    private var bentoGrid: some View {
-        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
-            summaryCard(
-                title: "Safe Caches",
-                icon: "sparkles",
+    private func sectionTitle(_ title: String) -> some View {
+        Text(title)
+            .font(.title3.bold())
+            .padding(.top, 4)
+    }
+
+    private var cardsGrid: some View {
+        LazyVGrid(columns: [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)], spacing: 14) {
+            categoryCard(
+                title: "Junk & Temp Files",
+                icon: "trash.fill",
                 color: .green,
-                items: viewModel.safeCacheItems,
-                summary: "Temporary app and package downloads. Apps recreate them automatically.",
-                include: Binding(
-                    get: { viewModel.smartCleanIncludeCaches },
-                    set: { viewModel.smartCleanIncludeCaches = $0 }
-                ),
+                detail: "Leftover app and browsing cache files. Recreated automatically as needed.",
                 tab: .safeCaches
             )
-            summaryCard(
-                title: "Stale vs. Active Projects",
+
+            categoryCard(
+                title: "Old Coding Folders",
                 icon: "hammer.fill",
                 color: .orange,
-                items: viewModel.staleProjects,
-                summary: "Build folders from projects you have not coded in recently. Source and Git history stay untouched.",
-                include: Binding(
-                    get: { viewModel.smartCleanIncludeStaleProjects },
-                    set: { viewModel.smartCleanIncludeStaleProjects = $0 }
-                ),
+                detail: "Heavy dependency folders untouched for 30+ days. Code stays completely safe.",
                 tab: .projects
             )
-            summaryCard(
-                title: "Terminal Packages & Docker",
-                icon: "terminal.fill",
-                color: .purple,
-                items: [],
-                summary: "CLI tools and runtimes installed outside the Applications folder. Review these separately.",
-                include: Binding(
-                    get: { viewModel.smartCleanIncludeTerminalPackages },
-                    set: { viewModel.smartCleanIncludeTerminalPackages = $0 }
-                ),
-                tab: .packages,
-                packageCount: viewModel.terminalPackages.count,
-                packageBytes: viewModel.terminalPackages.reduce(0) { $0.saturatingAdding($1.physicalBytes) },
-                toggleEnabled: false
-            )
-            summaryCard(
-                title: "Large Files",
-                icon: "externaldrive.fill.badge.timemachine",
+
+            categoryCard(
+                title: "Big Files",
+                icon: "externaldrive.fill",
                 color: .blue,
-                items: viewModel.largeFileItems,
-                summary: "Standalone installers, archives, models, media, and virtual disks. Inspect before removing.",
-                include: Binding(
-                    get: { viewModel.smartCleanIncludeInstallers },
-                    set: { viewModel.smartCleanIncludeInstallers = $0 }
-                ),
+                detail: "Large disk image installers, video files, and archives taking up room.",
                 tab: .largeFiles
             )
-            duplicateSummaryCard
+
+            categoryCard(
+                title: "Twin Files",
+                icon: "square.on.square",
+                color: .purple,
+                detail: "Exact copies of files or folders. One original copy is always kept safe.",
+                tab: .duplicates
+            )
+
+            categoryCard(
+                title: "Apps & Dev Tools",
+                icon: "shippingbox.fill",
+                color: .teal,
+                detail: "Command-line packages, runtimes, and Docker virtual machine disks.",
+                tab: .packages
+            )
         }
     }
 
-    private var duplicateSummaryCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Label("Duplicates", systemImage: "square.on.square")
-                    .font(.headline)
-                    .foregroundStyle(.orange)
-                Spacer()
-                Text(viewModel.byteCount(viewModel.recommendedDuplicateBytes))
-                    .font(.system(.headline, design: .monospaced))
-            }
-            Text("\(viewModel.duplicateGroupCount) group\(viewModel.duplicateGroupCount == 1 ? "" : "s")")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Text("Identical files, folders, and redundant runtimes. One original stays protected in every group.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .lineLimit(3)
-                .fixedSize(horizontal: false, vertical: true)
-            Divider()
-            HStack {
-                Button("Open Duplicates") {
-                    viewModel.selectedTab = .duplicates
-                }
-                .buttonStyle(.bordered)
-                .tint(.orange)
-                Spacer()
-                Text("Remove duplicates from the Duplicates page only.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-        }
-        .padding(15)
-        .background(.thinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .overlay {
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(Color.orange.opacity(0.18), lineWidth: 1)
-        }
-    }
-
-    private func summaryCard(
+    private func categoryCard(
         title: String,
         icon: String,
         color: Color,
-        items: [ScannedItem],
-        summary: String,
-        include: Binding<Bool>,
-        tab: NavigationTab,
-        packageCount: Int? = nil,
-        packageBytes: UInt64? = nil,
-        toggleEnabled: Bool = true
+        detail: String,
+        tab: NavigationTab
     ) -> some View {
-        let count = packageCount ?? items.count
-        let bytes = packageBytes ?? items.reduce(0) { $0.saturatingAdding($1.physicalBytes) }
+        let status = viewModel.status(for: tab)
         return VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Label(title, systemImage: icon)
-                    .font(.headline)
+            HStack(spacing: 8) {
+                Image(systemName: icon)
                     .foregroundStyle(color)
+                    .font(.headline)
+                Text(title)
+                    .font(.headline)
                 Spacer()
-                Text(viewModel.byteCount(bytes))
-                    .font(.system(.headline, design: .monospaced))
+
+                switch status {
+                case .notScanned:
+                    Text("Ready")
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.secondary.opacity(0.12))
+                        .clipShape(Capsule())
+
+                case .scanning:
+                    HStack(spacing: 4) {
+                        ProgressView()
+                            .controlSize(.mini)
+                        Text("Scanning…")
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(color)
+                    }
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(color.opacity(0.12))
+                    .clipShape(Capsule())
+
+                case .completed(let count, let bytes, _):
+                    Text(viewModel.byteCount(bytes))
+                        .font(.system(.subheadline, design: .rounded).weight(.semibold))
+                        .foregroundStyle(count > 0 ? color : .secondary)
+                        .monospacedDigit()
+
+                case .cancelled:
+                    Text("Stopped")
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(.orange)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.orange.opacity(0.12))
+                        .clipShape(Capsule())
+                }
             }
-            Text("\(count) item\(count == 1 ? "" : "s")")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Text(summary)
+
+            Text(detail)
                 .font(.callout)
                 .foregroundStyle(.secondary)
-                .lineLimit(3)
+                .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
-            Divider()
-            HStack {
-                if toggleEnabled {
-                    Toggle("Include in Smart Clean", isOn: include)
-                        .toggleStyle(.checkbox)
-                        .font(.caption)
-                } else {
-                    Label("CLI actions stay separate", systemImage: "lock.shield")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+
+            Spacer(minLength: 4)
+
+            HStack(spacing: 8) {
+                switch status {
+                case .notScanned:
+                    Button {
+                        viewModel.scanCategory(tab)
+                    } label: {
+                        Label("Scan \(title)", systemImage: "magnifyingglass")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(color)
+                    .disabled(viewModel.isWorking)
+
+                case .scanning:
+                    Button(role: .cancel) {
+                        viewModel.cancelScan()
+                    } label: {
+                        Label("Stop", systemImage: "xmark.circle")
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(.red)
+
+                case .completed(let count, _, _):
+                    Button {
+                        viewModel.selectedTab = tab
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text(count > 0 ? "Inspect (\(count))" : "Inspect")
+                            Image(systemName: "arrow.right")
+                                .font(.caption)
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(count > 0 ? color : .secondary)
+
+                    Button {
+                        viewModel.scanCategory(tab)
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    .buttonStyle(.bordered)
+                    .help("Rescan \(title)")
+                    .disabled(viewModel.isWorking)
+
+                case .cancelled:
+                    Button {
+                        viewModel.scanCategory(tab)
+                    } label: {
+                        Label("Scan Again", systemImage: "magnifyingglass")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(color)
+                    .disabled(viewModel.isWorking)
                 }
-                Spacer()
-                Button("Inspect Details →") {
-                    viewModel.selectedTab = tab
-                }
-                .buttonStyle(.link)
-                .font(.caption)
             }
         }
-        .padding(15)
-        .background(.thinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .overlay {
+        .padding(16)
+        .frame(minHeight: 140)
+        .background(
             RoundedRectangle(cornerRadius: 12)
-                .stroke(color.opacity(0.18), lineWidth: 1)
-        }
-    }
-}
-
-private extension UInt64 {
-    func saturatingAdding(_ other: UInt64) -> UInt64 {
-        addingReportingOverflow(other).partialValue
+                .fill(Color(NSColor.controlBackgroundColor))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(color.opacity(status.isScanning ? 0.45 : 0.16), lineWidth: status.isScanning ? 2 : 1)
+                }
+        )
     }
 }

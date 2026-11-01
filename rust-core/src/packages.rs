@@ -385,12 +385,21 @@ fn scan_packages_from_roots(
 }
 
 /// Inspects Homebrew, Python/Conda, Node, Rust, and container runtime footprints.
+pub(crate) fn scan_terminal_packages_with_token(
+    home: &Path,
+    token: &ScanToken,
+) -> Vec<TerminalPackage> {
+    crate::configure_scan_thread_pool();
+    crate::thermal::apply_current_thread_thermal_policy();
+    scan_packages_from_roots(home, standard_roots(home), token)
+}
+
+/// Inspects Homebrew, Python/Conda, Node, Rust, and container runtime footprints.
 #[uniffi::export]
 pub fn scan_terminal_packages(home_dir: String) -> Vec<TerminalPackage> {
     let token = ScanToken::begin();
-    crate::configure_scan_thread_pool();
     let home = PathBuf::from(home_dir);
-    scan_packages_from_roots(&home, standard_roots(&home), &token)
+    scan_terminal_packages_with_token(&home, &token)
 }
 
 fn gui_path(home: &Path) -> String {

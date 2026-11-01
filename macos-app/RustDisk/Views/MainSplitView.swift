@@ -2,23 +2,23 @@ import AppKit
 import SwiftUI
 
 enum NavigationTab: String, CaseIterable, Identifiable {
-    case smartOverview = "Smart Overview"
-    case safeCaches = "Safe Caches"
-    case projects = "Project Dependencies"
-    case packages = "Terminal Packages"
-    case largeFiles = "Large File Finder"
-    case duplicates = "Duplicates"
+    case smartOverview = "Quick Clean"
+    case safeCaches = "Junk & Temp Files"
+    case projects = "Old Coding Folders"
+    case largeFiles = "Big Files"
+    case duplicates = "Twin Files"
+    case packages = "Apps & Dev Tools"
 
     var id: String { rawValue }
 
     var icon: String {
         switch self {
-        case .smartOverview: return "sparkles.rectangle.stack.fill"
-        case .safeCaches: return "sparkles"
+        case .smartOverview: return "sparkles"
+        case .safeCaches: return "trash.fill"
         case .projects: return "hammer.fill"
-        case .packages: return "terminal.fill"
-        case .largeFiles: return "externaldrive.fill.badge.timemachine"
+        case .largeFiles: return "externaldrive.fill"
         case .duplicates: return "square.on.square"
+        case .packages: return "shippingbox.fill"
         }
     }
 }
@@ -29,10 +29,10 @@ struct MainSplitView: View {
     var body: some View {
         NavigationSplitView {
             List(selection: $viewModel.selectedTab) {
-                Section("Overview") {
+                Section("Dashboard") {
                     tabRow(.smartOverview)
                 }
-                Section("Audit") {
+                Section("Audit Modules") {
                     ForEach(NavigationTab.allCases.dropFirst()) { tab in
                         tabRow(tab)
                     }
@@ -98,8 +98,23 @@ struct MainSplitView: View {
     }
 
     private func tabRow(_ tab: NavigationTab) -> some View {
-        Label(tab.rawValue, systemImage: tab.icon)
-            .tag(tab)
+        HStack {
+            Label(tab.rawValue, systemImage: tab.icon)
+            Spacer()
+            if viewModel.activeScanningCategory == tab || (viewModel.activeScanningCategory == .smartOverview && (tab == .safeCaches || tab == .projects)) {
+                ProgressView()
+                    .controlSize(.mini)
+            } else if case let .completed(count, bytes, _) = viewModel.status(for: tab), count > 0 {
+                Text(viewModel.byteCount(bytes))
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.secondary.opacity(0.12))
+                    .clipShape(Capsule())
+            }
+        }
+        .tag(tab)
     }
 
     private var controlBar: some View {
@@ -110,30 +125,48 @@ struct MainSplitView: View {
             Spacer()
 
             Button {
-                viewModel.showingSafetyGuide = true
+                viewModel.showProDetails.toggle()
             } label: {
-                Label("Safety & APFS Guide", systemImage: "questionmark.circle")
+                Label("Pro Details", systemImage: viewModel.showProDetails ? "slider.horizontal.3" : "slider.horizontal.below.square.and.square")
             }
             .buttonStyle(.bordered)
+            .tint(viewModel.showProDetails ? .blue : nil)
+            .help("Toggle technical paths, block counts, and CLI restore commands.")
+
+            Button {
+                viewModel.showingSafetyGuide = true
+            } label: {
+                Label("Safety Guide", systemImage: "questionmark.circle")
+            }
+            .buttonStyle(.bordered)
+            .help("Learn how RustDisk protects your Mac.")
 
             if viewModel.isScanning {
-                Button {
+                Button(role: .cancel) {
                     viewModel.cancelScan()
                 } label: {
-                    Label("Cancel Scan", systemImage: "xmark.circle")
+                    Label("Stop Scan", systemImage: "xmark.circle")
                 }
                 .buttonStyle(.bordered)
+                .tint(.red)
             } else {
                 Button {
-                    viewModel.runScan()
+                    viewModel.scanCurrentTab()
                 } label: {
-                    Label("Scan Now", systemImage: "magnifyingglass")
+                    Label(
+                        viewModel.selectedTab == .smartOverview ? "Scan Fast Junk" : "Scan \(viewModel.selectedTab.rawValue)",
+                        systemImage: viewModel.selectedTab == .smartOverview ? "bolt.fill" : "magnifyingglass"
+                    )
                 }
                 .disabled(viewModel.isWorking)
                 .buttonStyle(.borderedProminent)
+                .tint(.blue)
+                .keyboardShortcut("r", modifiers: .command)
+                .help("Scan current category (Cmd + R)")
             }
         }
-        .padding(12)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
         .background(.ultraThinMaterial)
     }
 
@@ -142,11 +175,11 @@ struct MainSplitView: View {
             HStack(spacing: 8) {
                 ProgressView()
                     .controlSize(.small)
-                Text("Scan Progress")
+                Text("Scanning Mac Storage…")
                     .font(.headline)
                 Spacer()
                 Text(viewModel.scanPercentText)
-                    .font(.system(.callout, design: .monospaced).weight(.semibold))
+                    .font(.system(.callout, design: .rounded).weight(.semibold))
                     .foregroundStyle(Color.accentColor)
             }
 
@@ -167,7 +200,7 @@ struct MainSplitView: View {
             .font(.caption)
             .foregroundStyle(.secondary)
         }
-        .padding(.horizontal, 14)
+        .padding(.horizontal, 16)
         .padding(.vertical, 10)
         .background(Color.accentColor.opacity(0.08))
     }
@@ -177,7 +210,7 @@ struct MainSplitView: View {
         if viewModel.showingDiagnosticDetails, let message = viewModel.diagnosticMessage {
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
-                    Label("Some items need attention", systemImage: "exclamationmark.triangle.fill")
+                    Label("Some items were skipped", systemImage: "exclamationmark.triangle.fill")
                         .font(.headline)
                         .foregroundStyle(.orange)
                     Spacer()
@@ -187,28 +220,32 @@ struct MainSplitView: View {
                         Image(systemName: "xmark")
                     }
                     .buttonStyle(.borderless)
-                    .help("Dismiss diagnostic details")
+                    .help("Dismiss details")
                 }
+
                 Text(message)
                     .font(.callout)
                     .foregroundStyle(.secondary)
+
                 HStack(spacing: 10) {
                     Button("Open Full Disk Access Settings") {
                         viewModel.openFullDiskAccessSettings()
                     }
                     .buttonStyle(.bordered)
-                    Button("Reveal Skipped Items in Finder") {
+
+                    Button("Show in Finder") {
                         viewModel.revealDiagnosticPaths()
                     }
                     .buttonStyle(.bordered)
                     .disabled(viewModel.diagnosticSkippedPaths.isEmpty)
+
                     Button("Dismiss") {
                         viewModel.showingDiagnosticDetails = false
                     }
                     .buttonStyle(.link)
                 }
             }
-            .padding(.horizontal, 14)
+            .padding(.horizontal, 16)
             .padding(.vertical, 10)
             .background(Color.orange.opacity(0.10))
         }
@@ -219,7 +256,8 @@ struct MainSplitView: View {
             Text(viewModel.statusBanner)
                 .font(.callout)
                 .foregroundStyle(.secondary)
-                .lineLimit(2)
+                .lineLimit(1)
+                .truncationMode(.middle)
 
             if viewModel.showingOpenTrashAction {
                 Button("Open Trash", systemImage: "trash") {
@@ -230,7 +268,7 @@ struct MainSplitView: View {
 
             Spacer()
 
-            Button("Reset to Recommended") {
+            Button("Reset Selection") {
                 viewModel.resetToRecommended()
             }
             .buttonStyle(.bordered)
@@ -240,17 +278,36 @@ struct MainSplitView: View {
                viewModel.selectedTab != .packages,
                viewModel.selectedTab != .smartOverview,
                viewModel.selectedItemCount > 0 {
-                Button(role: viewModel.deletionMode == .permanentDelete ? .destructive : nil) {
-                    viewModel.requestCleanup()
-                } label: {
-                    Text("Review Cleanup (\(viewModel.selectedItemCount))")
+
+                HStack(spacing: 6) {
+                    Button {
+                        viewModel.deletionMode = .moveToTrash
+                        viewModel.requestCleanup()
+                    } label: {
+                        Text("Move to Trash (\(viewModel.selectedItemCount))")
+                    }
+                    .disabled(viewModel.isWorking)
+                    .buttonStyle(.borderedProminent)
+                    .tint(.green)
+
+                    Menu {
+                        Button(role: .destructive) {
+                            viewModel.deletionMode = .permanentDelete
+                            viewModel.requestCleanup()
+                        } label: {
+                            Label("Delete Permanently…", systemImage: "trash.slash")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis")
+                    }
+                    .menuStyle(.borderlessButton)
+                    .help("Advanced deletion options")
                 }
-                .disabled(viewModel.isWorking)
-                .buttonStyle(.borderedProminent)
-                .tint(viewModel.deletionMode == .permanentDelete ? .red : .blue)
             }
         }
-        .padding(12)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(.ultraThinMaterial)
     }
 }
 
@@ -259,64 +316,68 @@ struct CleanupConfirmationSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 18) {
             HStack {
-                Label("Review Cleanup", systemImage: "checklist")
-                    .font(.title2.bold())
+                Label(
+                    viewModel.deletionMode == .permanentDelete
+                        ? "Permanently Delete Selected Items"
+                        : "Move Selected Items to Trash",
+                    systemImage: viewModel.deletionMode == .permanentDelete ? "exclamationmark.triangle.fill" : "trash.fill"
+                )
+                .font(.title2.bold())
+                .foregroundStyle(viewModel.deletionMode == .permanentDelete ? .red : .green)
+
                 Spacer()
+
                 Button("Cancel") { dismiss() }
             }
 
-            Text(viewModel.deletionMode == .permanentDelete
-                 ? "You selected \(viewModel.selectedDirectoryCount) item(s). Deleting them permanently frees \(viewModel.byteCount(viewModel.selectedPhysicalBytes)) of physical APFS storage."
-                 : "You selected \(viewModel.selectedDirectoryCount) item(s) (\(viewModel.byteCount(viewModel.selectedPhysicalBytes))). Moving them to the Trash frees no space until you empty the Trash.")
-                .font(.body)
+            Text(
+                viewModel.deletionMode == .permanentDelete
+                    ? "Warning: Permanent deletion cannot be undone. Selected items (\(viewModel.byteCount(viewModel.selectedPhysicalBytes))) will be immediately removed from your disk."
+                    : "Selected items (\(viewModel.byteCount(viewModel.selectedPhysicalBytes))) will be moved safely to your macOS Trash. You can restore them anytime by clicking 'Put Back' in Trash."
+            )
+            .font(.body)
+            .foregroundStyle(.secondary)
 
-            Picker("Cleanup action", selection: $viewModel.deletionMode) {
-                Text("Move to Trash").tag(DeletionMode.moveToTrash)
-                Text("Permanent Delete").tag(DeletionMode.permanentDelete)
-            }
-            .pickerStyle(.segmented)
-
-            HStack {
-                Text(viewModel.deletionMode == .permanentDelete
-                     ? "Permanent Delete — Irreversible"
-                     : "Move to Trash — Recoverable")
-                    .font(.headline)
-                    .foregroundStyle(viewModel.deletionMode == .permanentDelete ? .red : .blue)
-                Spacer()
-            }
-            .padding(10)
-            .background((viewModel.deletionMode == .permanentDelete ? Color.red : Color.blue).opacity(0.10))
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-
-            VStack(alignment: .leading, spacing: 7) {
+            VStack(alignment: .leading, spacing: 8) {
                 Text("Selected breakdown")
                     .font(.headline)
                 ForEach(viewModel.selectedBreakdown) { breakdown in
                     HStack {
                         Text(breakdown.category)
                         Spacer()
-                        Text("\(breakdown.count) · \(viewModel.byteCount(breakdown.physicalBytes))")
-                            .font(.system(.callout, design: .monospaced))
+                        Text("\(breakdown.count) item(s) · \(viewModel.byteCount(breakdown.physicalBytes))")
+                            .font(.system(.callout, design: .rounded))
                             .foregroundStyle(.secondary)
                     }
                 }
             }
+            .padding(12)
+            .background(Color(NSColor.controlBackgroundColor))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
 
             if viewModel.selectedActiveProjectCount > 0 {
-                warning("Active project dependencies are included. Source files are not targeted, but these projects were used recently.")
+                Label("Warning: \(viewModel.selectedActiveProjectCount) active project dependencies are selected.", systemImage: "exclamationmark.triangle.fill")
+                    .font(.callout)
+                    .foregroundStyle(.orange)
+                    .padding(10)
+                    .background(Color.orange.opacity(0.12))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
             }
 
-            Text("Locked paths and protected system locations will be skipped and reported.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
+            Text("System folders and protected files are locked and will be skipped.")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
 
             HStack {
                 Spacer()
                 Button("Cancel") { dismiss() }
                     .buttonStyle(.bordered)
-                Button(viewModel.deletionMode == .permanentDelete ? "Permanently Delete" : "Move to Trash") {
+
+                Button(
+                    viewModel.deletionMode == .permanentDelete ? "Delete Permanently" : "Move to Trash"
+                ) {
                     dismiss()
                     if viewModel.deletionMode == .permanentDelete {
                         viewModel.confirmPermanentCleanup()
@@ -325,20 +386,10 @@ struct CleanupConfirmationSheet: View {
                     }
                 }
                 .buttonStyle(.borderedProminent)
-                .tint(viewModel.deletionMode == .permanentDelete ? .red : .blue)
+                .tint(viewModel.deletionMode == .permanentDelete ? .red : .green)
             }
         }
         .padding(24)
-        .frame(width: 590)
-    }
-
-    private func warning(_ text: String) -> some View {
-        Label(text, systemImage: "exclamationmark.triangle.fill")
-            .font(.callout)
-            .foregroundStyle(.orange)
-            .padding(10)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.orange.opacity(0.12))
-            .clipShape(RoundedRectangle(cornerRadius: 8))
+        .frame(width: 540)
     }
 }

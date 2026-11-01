@@ -268,6 +268,12 @@ RustBuffer uniffi_rustdisk_core_fn_func_get_disk_overview(RustCallStatus *_Nonnu
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_RUSTDISK_CORE_FN_FUNC_GET_THERMAL_LEVEL
+#define UNIFFI_FFIDEF_UNIFFI_RUSTDISK_CORE_FN_FUNC_GET_THERMAL_LEVEL
+uint8_t uniffi_rustdisk_core_fn_func_get_thermal_level(RustCallStatus *_Nonnull out_status
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_RUSTDISK_CORE_FN_FUNC_PURGE_ITEMS
 #define UNIFFI_FFIDEF_UNIFFI_RUSTDISK_CORE_FN_FUNC_PURGE_ITEMS
 RustBuffer uniffi_rustdisk_core_fn_func_purge_items(RustBuffer paths, RustBuffer mode, RustCallStatus *_Nonnull out_status
@@ -286,6 +292,11 @@ RustBuffer uniffi_rustdisk_core_fn_func_run_terminal_uninstall(RustBuffer manage
 #ifndef UNIFFI_FFIDEF_UNIFFI_RUSTDISK_CORE_FN_FUNC_SCAN_DUPLICATES
 #define UNIFFI_FFIDEF_UNIFFI_RUSTDISK_CORE_FN_FUNC_SCAN_DUPLICATES
 RustBuffer uniffi_rustdisk_core_fn_func_scan_duplicates(RustBuffer root_path, uint64_t min_size_bytes, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_RUSTDISK_CORE_FN_FUNC_SCAN_FULL_AUDIT
+#define UNIFFI_FFIDEF_UNIFFI_RUSTDISK_CORE_FN_FUNC_SCAN_FULL_AUDIT
+RustBuffer uniffi_rustdisk_core_fn_func_scan_full_audit(RustBuffer options, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_RUSTDISK_CORE_FN_FUNC_SCAN_LARGE_FILES
@@ -311,6 +322,11 @@ RustBuffer uniffi_rustdisk_core_fn_func_scan_safe_caches(RustBuffer home_dir, Ru
 #ifndef UNIFFI_FFIDEF_UNIFFI_RUSTDISK_CORE_FN_FUNC_SCAN_TERMINAL_PACKAGES
 #define UNIFFI_FFIDEF_UNIFFI_RUSTDISK_CORE_FN_FUNC_SCAN_TERMINAL_PACKAGES
 RustBuffer uniffi_rustdisk_core_fn_func_scan_terminal_packages(RustBuffer home_dir, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_RUSTDISK_CORE_FN_FUNC_SET_THERMAL_LEVEL
+#define UNIFFI_FFIDEF_UNIFFI_RUSTDISK_CORE_FN_FUNC_SET_THERMAL_LEVEL
+void uniffi_rustdisk_core_fn_func_set_thermal_level(uint8_t level, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_FFI_RUSTDISK_CORE_RUSTBUFFER_ALLOC
@@ -611,6 +627,12 @@ uint16_t uniffi_rustdisk_core_checksum_func_get_disk_overview(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_RUSTDISK_CORE_CHECKSUM_FUNC_GET_THERMAL_LEVEL
+#define UNIFFI_FFIDEF_UNIFFI_RUSTDISK_CORE_CHECKSUM_FUNC_GET_THERMAL_LEVEL
+uint16_t uniffi_rustdisk_core_checksum_func_get_thermal_level(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_RUSTDISK_CORE_CHECKSUM_FUNC_PURGE_ITEMS
 #define UNIFFI_FFIDEF_UNIFFI_RUSTDISK_CORE_CHECKSUM_FUNC_PURGE_ITEMS
 uint16_t uniffi_rustdisk_core_checksum_func_purge_items(void
@@ -632,6 +654,12 @@ uint16_t uniffi_rustdisk_core_checksum_func_run_terminal_uninstall(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_RUSTDISK_CORE_CHECKSUM_FUNC_SCAN_DUPLICATES
 #define UNIFFI_FFIDEF_UNIFFI_RUSTDISK_CORE_CHECKSUM_FUNC_SCAN_DUPLICATES
 uint16_t uniffi_rustdisk_core_checksum_func_scan_duplicates(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_RUSTDISK_CORE_CHECKSUM_FUNC_SCAN_FULL_AUDIT
+#define UNIFFI_FFIDEF_UNIFFI_RUSTDISK_CORE_CHECKSUM_FUNC_SCAN_FULL_AUDIT
+uint16_t uniffi_rustdisk_core_checksum_func_scan_full_audit(void
     
 );
 #endif
@@ -662,6 +690,12 @@ uint16_t uniffi_rustdisk_core_checksum_func_scan_safe_caches(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_RUSTDISK_CORE_CHECKSUM_FUNC_SCAN_TERMINAL_PACKAGES
 #define UNIFFI_FFIDEF_UNIFFI_RUSTDISK_CORE_CHECKSUM_FUNC_SCAN_TERMINAL_PACKAGES
 uint16_t uniffi_rustdisk_core_checksum_func_scan_terminal_packages(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_RUSTDISK_CORE_CHECKSUM_FUNC_SET_THERMAL_LEVEL
+#define UNIFFI_FFIDEF_UNIFFI_RUSTDISK_CORE_CHECKSUM_FUNC_SET_THERMAL_LEVEL
+uint16_t uniffi_rustdisk_core_checksum_func_set_thermal_level(void
     
 );
 #endif

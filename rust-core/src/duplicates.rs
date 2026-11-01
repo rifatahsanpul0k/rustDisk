@@ -8,11 +8,14 @@ use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
 use std::io::{Read, Seek, SeekFrom};
 use std::os::unix::fs::MetadataExt;
+use std::os::unix::io::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
 const BYTES_PER_BLOCK: u64 = 512;
-const DEFAULT_MIN_SIZE_BYTES: u64 = 1024 * 1024;
+pub(crate) const DEFAULT_MIN_SIZE_BYTES: u64 = 1024 * 1024;
+pub(crate) const HUGE_FILE_SAMPLE_THRESHOLD: u64 = 1_073_741_824;
+const SAMPLE_WINDOW_SIZE: usize = 65_536;
 const EDGE_BYTES: usize = 4096;
 const DAY_SECONDS: u64 = 86_400;
 
@@ -40,13 +43,13 @@ const SKIP_DIRECTORY_NAMES: [&str; 10] = [
 ];
 
 #[derive(Clone, Debug)]
-struct FileCandidate {
-    path: PathBuf,
-    physical_bytes: u64,
-    logical_bytes: u64,
-    modified: SystemTime,
-    device: u64,
-    inode: u64,
+pub(crate) struct FileCandidate {
+    pub(crate) path: PathBuf,
+    pub(crate) physical_bytes: u64,
+    pub(crate) logical_bytes: u64,
+    pub(crate) modified: SystemTime,
+    pub(crate) device: u64,
+    pub(crate) inode: u64,
 }
 
 #[derive(Clone, Debug)]
@@ -79,7 +82,7 @@ fn metadata_modified(path: &Path) -> SystemTime {
         .unwrap_or(SystemTime::UNIX_EPOCH)
 }
 
-fn is_bundle(path: &Path) -> bool {
+pub(crate) fn is_bundle(path: &Path) -> bool {
     let name = path
         .file_name()
         .map(|value| value.to_string_lossy().to_ascii_lowercase())
@@ -87,7 +90,7 @@ fn is_bundle(path: &Path) -> bool {
     BUNDLE_SUFFIXES.iter().any(|suffix| name.ends_with(suffix))
 }
 
-fn is_protected_path(path: &Path) -> bool {
+pub(crate) fn is_protected_path(path: &Path) -> bool {
     path.starts_with("/System")
         || path.starts_with("/bin")
         || path.starts_with("/sbin")
@@ -150,11 +153,13 @@ fn walk_files(root: &Path, min_size_bytes: u64, token: &ScanToken) -> Vec<FileCa
 
     let mut candidates = Vec::new();
     let mut seen_inodes = HashSet::new();
+    let mut walk_counter = 0u32;
 
     for entry in walker.into_iter().flatten() {
         if token.is_cancelled() {
             return Vec::new();
         }
+        crate::thermal::thermal_pace_walk(&mut walk_counter);
         let path = entry.path();
         if !entry.file_type().is_file() || is_protected_path(&path) {
             continue;
@@ -177,6 +182,10 @@ fn walk_files(root: &Path, min_size_bytes: u64, token: &ScanToken) -> Vec<FileCa
 
 fn edge_hash(candidate: &FileCandidate) -> Option<String> {
     let mut file = File::open(&candidate.path).ok()?;
+    #[cfg(target_os = "macos")]
+    unsafe {
+        let _ = libc::fcntl(file.as_raw_fd(), libc::F_NOCACHE, 1);
+    }
     let mut first = vec![0u8; EDGE_BYTES.min(candidate.logical_bytes as usize)];
     file.read_exact(&mut first).ok()?;
 
@@ -195,23 +204,51 @@ fn edge_hash(candidate: &FileCandidate) -> Option<String> {
     Some(hasher.finalize().to_hex().to_string())
 }
 
-/// Hashes a whole file in 64 KiB chunks. Returns `None` on read errors and as
-/// soon as `token` is cancelled, so a multi-gigabyte file stops mid-read.
-fn full_hash(path: &Path, token: &ScanToken) -> Option<String> {
+/// Hashes a file in 64 KiB chunks for files < 1 GiB, or uses an 8-window multi-point
+/// stride sample for files >= 1 GiB. Returns `None` on read errors and as soon as `token`
+/// is cancelled, so a multi-gigabyte file stops mid-read.
+pub(crate) fn full_hash(path: &Path, token: &ScanToken) -> Option<String> {
     let mut file = File::open(path).ok()?;
-    let mut hasher = Hasher::new();
-    let mut buffer = [0u8; 64 * 1024];
-    loop {
-        if token.is_cancelled() {
-            return None;
-        }
-        let read = file.read(&mut buffer).ok()?;
-        if read == 0 {
-            break;
-        }
-        hasher.update(&buffer[..read]);
+    #[cfg(target_os = "macos")]
+    unsafe {
+        let _ = libc::fcntl(file.as_raw_fd(), libc::F_NOCACHE, 1);
     }
-    Some(hasher.finalize().to_hex().to_string())
+
+    let logical_bytes = file.metadata().ok()?.len();
+    let mut hasher = Hasher::new();
+
+    if logical_bytes >= HUGE_FILE_SAMPLE_THRESHOLD {
+        let max_start = logical_bytes.saturating_sub(SAMPLE_WINDOW_SIZE as u64);
+        let mut buffer = [0u8; SAMPLE_WINDOW_SIZE];
+        for i in 0..8 {
+            if token.is_cancelled() {
+                return None;
+            }
+            crate::thermal::thermal_pace_hash(i as u32);
+            let offset = (max_start as u128 * i as u128 / 7) as u64;
+            file.seek(SeekFrom::Start(offset)).ok()?;
+            file.read_exact(&mut buffer).ok()?;
+            hasher.update(&buffer);
+        }
+        hasher.update(&logical_bytes.to_le_bytes());
+        Some(format!("sampled-1g:{}", hasher.finalize().to_hex()))
+    } else {
+        let mut buffer = [0u8; 64 * 1024];
+        let mut chunk_index = 0u32;
+        loop {
+            if token.is_cancelled() {
+                return None;
+            }
+            crate::thermal::thermal_pace_hash(chunk_index);
+            let read = file.read(&mut buffer).ok()?;
+            if read == 0 {
+                break;
+            }
+            hasher.update(&buffer[..read]);
+            chunk_index = chunk_index.wrapping_add(1);
+        }
+        Some(hasher.finalize().to_hex().to_string())
+    }
 }
 
 fn edge_collision_candidates(candidates: &[FileCandidate], token: &ScanToken) -> HashSet<PathBuf> {
@@ -434,14 +471,25 @@ fn make_file_group(hash: &str, mut files: Vec<FileCandidate>) -> DuplicateGroup 
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_else(|| "Identical files".to_owned());
 
-    DuplicateGroup {
-        id: format!("file:{hash}"),
-        title,
-        subtitle: format!(
+    let is_sampled = hash.starts_with("sampled-1g:");
+    let subtitle = if is_sampled {
+        format!(
+            "{} identical copies · Keep 1, reclaim {} · Fast 8-point fingerprint (files >= 1 GB)",
+            members.len(),
+            human_bytes(reclaimable)
+        )
+    } else {
+        format!(
             "{} identical copies · Keep 1, reclaim {}",
             members.len(),
             human_bytes(reclaimable)
-        ),
+        )
+    };
+
+    DuplicateGroup {
+        id: format!("file:{hash}"),
+        title,
+        subtitle,
         kind: DuplicateKind::DuplicateFile,
         category: duplicate_category(&files[0].path).to_owned(),
         single_item_bytes: members[0].physical_bytes,
@@ -730,7 +778,7 @@ fn child_directories(path: &Path) -> Vec<PathBuf> {
 /// than reading the host's real Homebrew inside the scan, lets tests run against
 /// a simulated machine only.
 #[derive(Clone, Debug, Default)]
-struct SystemRoots {
+pub(crate) struct SystemRoots {
     cellars: Vec<PathBuf>,
     npm_modules: Vec<PathBuf>,
 }
@@ -739,7 +787,7 @@ impl SystemRoots {
     /// The real Homebrew install. Only `/opt/homebrew` is included: System Armor
     /// refuses to delete anywhere else in `/opt` or `/usr`, so listing
     /// `/usr/local` packages here would offer copies that cannot be removed.
-    fn host() -> Self {
+    pub(crate) fn host() -> Self {
         Self {
             cellars: vec![PathBuf::from("/opt/homebrew/Cellar")],
             npm_modules: vec![PathBuf::from("/opt/homebrew/lib/node_modules")],
@@ -747,13 +795,13 @@ impl SystemRoots {
     }
 
     /// A machine with no installs outside the scanned root.
-    fn none() -> Self {
+    pub(crate) fn none() -> Self {
         Self::default()
     }
 
     /// Scanning a real home folder (or `/`) includes the host's installs;
     /// scanning anything else, such as a test directory, does not.
-    fn for_scan_root(root: &Path) -> Self {
+    pub(crate) fn for_scan_root(root: &Path) -> Self {
         if root == Path::new("/") || root.starts_with("/Users/") {
             Self::host()
         } else {
@@ -971,22 +1019,12 @@ fn package_groups(
     groups
 }
 
-fn scan_duplicates_impl(
+pub(crate) fn process_duplicate_candidates(
     root: &Path,
-    min_size_bytes: u64,
-    token: &ScanToken,
+    candidates: Vec<FileCandidate>,
     system_roots: &SystemRoots,
+    token: &ScanToken,
 ) -> Vec<DuplicateGroup> {
-    crate::configure_scan_thread_pool();
-    let threshold = if min_size_bytes == 0 {
-        DEFAULT_MIN_SIZE_BYTES
-    } else {
-        min_size_bytes
-    };
-    // A cancelled stage yields partial data, and groups built from partial
-    // hashes could be wrong. Every stage boundary therefore bails out with no
-    // results rather than continuing with incomplete input.
-    let candidates = walk_files(root, threshold, token);
     if token.is_cancelled() {
         return Vec::new();
     }
@@ -1040,6 +1078,29 @@ fn scan_duplicates_impl(
             .cmp(&left.reclaimable_physical_bytes)
     });
     groups
+}
+
+fn scan_duplicates_impl(
+    root: &Path,
+    min_size_bytes: u64,
+    token: &ScanToken,
+    system_roots: &SystemRoots,
+) -> Vec<DuplicateGroup> {
+    crate::configure_scan_thread_pool();
+    crate::thermal::apply_current_thread_thermal_policy();
+    let threshold = if min_size_bytes == 0 {
+        DEFAULT_MIN_SIZE_BYTES
+    } else {
+        min_size_bytes
+    };
+    // A cancelled stage yields partial data, and groups built from partial
+    // hashes could be wrong. Every stage boundary therefore bails out with no
+    // results rather than continuing with incomplete input.
+    let candidates = walk_files(root, threshold, token);
+    if token.is_cancelled() {
+        return Vec::new();
+    }
+    process_duplicate_candidates(root, candidates, system_roots, token)
 }
 
 #[uniffi::export]
@@ -1109,13 +1170,13 @@ mod tests {
     #[test]
     fn full_hash_stops_in_the_middle_of_a_huge_file_when_cancelled() {
         let root = root("hash-cancel");
-        // Sparse 2 GiB file: costs no disk space but takes far longer to hash
-        // than the cancel delay below, so the hash can only return `None` by
-        // noticing the token mid-file.
+        // Sparse 500 MiB file (< 1 GiB full read): costs no disk space but takes
+        // far longer to hash than the cancel delay below, so the hash can only
+        // return `None` by noticing the token mid-file.
         let huge = root.join("huge.bin");
         File::create(&huge)
             .unwrap()
-            .set_len(2 * 1024 * 1024 * 1024)
+            .set_len(500 * 1024 * 1024)
             .unwrap();
 
         let token = ScanToken::never();
@@ -1293,5 +1354,100 @@ mod tests {
 
         let roots = SystemRoots::for_scan_root(Path::new("/var/tmp/rustdisk-not-a-home"));
         assert!(roots.cellars.is_empty() && roots.npm_modules.is_empty());
+    }
+
+    #[test]
+    fn huge_file_sparse_multi_point_fingerprinting() {
+        use std::io::{Seek, SeekFrom, Write};
+
+        let root = root("huge-sparse-test");
+        let token = ScanToken::never();
+
+        let file_a_path = root.join("huge_a.iso");
+        let file_b_path = root.join("huge_b.iso");
+        let file_c_path = root.join("huge_c.iso");
+
+        let size: u64 = 1_073_741_824; // 1 GiB
+        let max_start = size - 65_536;
+
+        let prefix_payload = vec![0x42; 2 * 1024 * 1024]; // 2 MiB allocated
+
+        // Create file A (1 GiB sparse)
+        let mut file_a = File::create(&file_a_path).unwrap();
+        file_a.set_len(size).unwrap();
+        file_a.write_all(&prefix_payload).unwrap();
+        file_a.seek(SeekFrom::Start(max_start)).unwrap();
+        file_a.write_all(&[0x43; 4096]).unwrap();
+        file_a.sync_all().unwrap();
+        drop(file_a);
+
+        // Create file B (1 GiB sparse) with identical contents to A
+        let mut file_b = File::create(&file_b_path).unwrap();
+        file_b.set_len(size).unwrap();
+        file_b.write_all(&prefix_payload).unwrap();
+        file_b.seek(SeekFrom::Start(max_start)).unwrap();
+        file_b.write_all(&[0x43; 4096]).unwrap();
+        file_b.sync_all().unwrap();
+        drop(file_b);
+
+        // Create file C (1 GiB sparse) which differs in the middle at window 3 (3/7 offset)
+        let mut file_c = File::create(&file_c_path).unwrap();
+        file_c.set_len(size).unwrap();
+        file_c.write_all(&prefix_payload).unwrap();
+        let mid_offset = (max_start as u128 * 3 / 7) as u64;
+        file_c.seek(SeekFrom::Start(mid_offset)).unwrap();
+        file_c.write_all(&[0xFF; 4096]).unwrap();
+        file_c.seek(SeekFrom::Start(max_start)).unwrap();
+        file_c.write_all(&[0x43; 4096]).unwrap();
+        file_c.sync_all().unwrap();
+        drop(file_c);
+
+        // Verify hash computation
+        let hash_a = full_hash(&file_a_path, &token).unwrap();
+        let hash_b = full_hash(&file_b_path, &token).unwrap();
+        let hash_c = full_hash(&file_c_path, &token).unwrap();
+
+        assert!(hash_a.starts_with("sampled-1g:"));
+        assert!(hash_b.starts_with("sampled-1g:"));
+        assert!(hash_c.starts_with("sampled-1g:"));
+
+        assert_eq!(
+            hash_a, hash_b,
+            "Identical 1 GiB files must produce identical sampled hashes"
+        );
+        assert_ne!(
+            hash_a, hash_c,
+            "Files differing in the middle must NOT produce identical sampled hashes"
+        );
+
+        // Verify DuplicateGroup creation via scan
+        let groups = scan_duplicates_impl(&root, 4096, &token, &SystemRoots::none());
+        assert_eq!(
+            groups.len(),
+            1,
+            "Only file A and file B should form a group"
+        );
+        assert_eq!(groups[0].members.len(), 2);
+        assert!(groups[0].subtitle.contains("Fast 8-point fingerprint"));
+
+        let paths: Vec<_> = groups[0].members.iter().map(|m| &m.path).collect();
+        let canon_a = fs::canonicalize(&file_a_path)
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        let canon_b = fs::canonicalize(&file_b_path)
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        let canon_c = fs::canonicalize(&file_c_path)
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+
+        assert!(paths.contains(&&canon_a));
+        assert!(paths.contains(&&canon_b));
+        assert!(!paths.contains(&&canon_c));
+
+        let _ = fs::remove_dir_all(root);
     }
 }
